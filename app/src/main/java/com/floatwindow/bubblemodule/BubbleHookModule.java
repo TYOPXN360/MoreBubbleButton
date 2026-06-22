@@ -424,38 +424,32 @@ public class BubbleHookModule extends XposedModule {
     }
 
     /**
-     * 退出多任务界面
+     * 退出多任务界面 — 直接调用 RecentsView.finishRecentsAnimation
      */
     private void dismissOverview(Context ctx) {
         try {
-            // 方法1: 通过 RecentsView 调用 finishRecentsAnimation
-            if (recentsViewInstance != null) {
-                Method finishRecents = findMethod(recentsViewInstance.getClass(), "finishRecentsAnimation", boolean.class, boolean.class);
-                if (finishRecents != null) {
-                    finishRecents.invoke(recentsViewInstance, true, false);
-                    log(Log.INFO, TAG, "dismissed overview via finishRecentsAnimation");
+            Object rv = recentsViewInstance;
+            if (rv == null) rv = findRecentsViewFromHierarchy(
+                    ((android.app.Activity) ctx).findViewById(android.R.id.content));
+
+            if (rv != null) {
+                // finishRecentsAnimation(toHome=true, shouldPip=false, runnable=null)
+                Method m = findMethod(rv.getClass(), "finishRecentsAnimation",
+                        boolean.class, boolean.class, Runnable.class);
+                if (m != null) {
+                    m.invoke(rv, true, false, null);
+                    log(Log.INFO, TAG, "dismissed via finishRecentsAnimation");
                     return;
                 }
-                // 尝试 onDismiss
-                Method onDismiss = findMethod(recentsViewInstance.getClass(), "onDismiss");
-                if (onDismiss != null) {
-                    onDismiss.invoke(recentsViewInstance);
-                    log(Log.INFO, TAG, "dismissed overview via onDismiss");
+                // fallback: startHome
+                Method startHome = findMethod(rv.getClass(), "startHome", Runnable.class);
+                if (startHome != null) {
+                    startHome.invoke(rv, (Runnable) null);
+                    log(Log.INFO, TAG, "dismissed via startHome");
                     return;
                 }
             }
-
-            // 方法2: 通过 am 命令发送 HOME
-            android.os.Handler handler = new android.os.Handler(Looper.getMainLooper());
-            handler.postDelayed(() -> {
-                try {
-                    Runtime.getRuntime().exec(new String[]{"input", "keyevent", "KEYCODE_HOME"});
-                    log(Log.INFO, TAG, "dismissed overview via HOME keyevent");
-                } catch (Throwable t) {
-                    log(Log.ERROR, TAG, "HOME keyevent failed: " + t.getMessage());
-                }
-            }, 300);
-
+            log(Log.WARN, TAG, "Could not find dismiss method");
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
         }
