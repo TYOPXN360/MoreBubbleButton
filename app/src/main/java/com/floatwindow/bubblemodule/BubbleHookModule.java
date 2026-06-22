@@ -2,13 +2,16 @@ package com.floatwindow.bubblemodule;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.graphics.Rect;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
+import android.os.UserHandle;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -34,7 +37,7 @@ public class BubbleHookModule extends XposedModule {
     private Object recentsViewInstance;
     private View bubbleButton;
     private View secondRow;
-    private boolean isInOverview = false;
+    private ClassLoader mLauncherClassLoader; // 缓存 Launcher 的 classloader
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
@@ -55,6 +58,7 @@ public class BubbleHookModule extends XposedModule {
 
     private void hookLauncher(PackageLoadedParam param) {
         ClassLoader cl = param.getDefaultClassLoader();
+        mLauncherClassLoader = cl;
 
         // 1. Hook RecentsView 构造函数
         try {
@@ -447,61 +451,263 @@ public class BubbleHookModule extends XposedModule {
     }
 
     /**
-     * 点击处理
+     * 点击处理 — 触发消息气泡功能
      */
     private void onBubbleButtonClick(View actionsView) {
         Context ctx = actionsView.getContext();
         log(Log.INFO, TAG, "Bubble button clicked!");
 
-        if (triggerBubbleViaShell()) {
-            showToast(ctx, "气泡栏已触发 (Shell)");
+        // 方案1: 通过 SystemUiProxy 的 showAppBubble 触发气泡
+        if (triggerBubbleViaSystemUiProxy(ctx)) {
             return;
         }
 
+        // 方案2: 通过 Shell Binder 直接调用
+        if (triggerBubbleViaShell(ctx)) {
+            return;
+        }
+
+        // 方案3: 打开气泡通知设置页面
         try {
             android.content.Intent intent = new android.content.Intent(
-                    "android.settings.BUBBLE_NOTIFICATION_SETTINGS");
+                    "android.settings.NOTIFICATION_SETTINGS");
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
             ctx.startActivity(intent);
-            log(Log.INFO, TAG, "Launched bubble settings");
+            log(Log.INFO, TAG, "Opened notification settings");
             return;
         } catch (Throwable t) {
-            log(Log.WARN, TAG, "Bubble settings not available: " + t.getMessage());
+            log(Log.WARN, TAG, "Notification settings not available: " + t.getMessage());
         }
 
+        // 兜底：显示说明对话框
+        showBubbleDialog(ctx);
+    }
+
+    /**
+     * 通过 SystemUiProxy.showAppBubble 触发气泡
+     * 这是最正统的方式——复用启动器的 SystemUiProxy 单例
+     */
+    private boolean triggerBubbleViaSystemUiProxy(Context ctx) {
+        try {
+            // 方案A: 直接通过 Launcher Activity 获取 SystemUiProxy
+            android.app.Activity activity = null;
+            if (ctx instanceof android.app.Activity) {
+                activity = (android.app.Activity) ctx;
+            } else if (ctx instanceof android.view.ContextThemeWrapper) {
+                android.content.Context base = ((android.view.ContextThemeWrapper) ctx).getBaseContext();
+                while (base instanceof android.content.ContextWrapper) {
+                    if (base instanceof android.app.Activity) {
+                        activity = (android.app.Activity) base;
+                        break;
+                    }
+                    base = ((android.content.ContextWrapper) base).getBaseContext();
+                }
+            }
+
+            Object systemUiProxy = null;
+
+            // 尝试从 Activity 获取
+            if (activity != null) {
+                try {
+                    // QuickstepLauncher extends Launcher extends Activity
+                    // QuickstepLauncher 有 mSystemUiProxy 字段
+                    java.lang.reflect.Field proxyField = findField(activity.getClass(), "mSystemUiProxy");
+                    if (proxyField != null) {
+                        proxyField.setAccessible(true);
+                        systemUiProxy = proxyField.get(activity);
+                        log(Log.INFO, TAG, "Got SystemUiProxy from Activity field: " + systemUiProxy);
+                    }
+                } catch (Throwable t) {
+                    log(Log.WARN, TAG, "Field access failed: " + t.getMessage());
+                }
+            }
+
+            // 方案B: 通过 DaggerSingletonObject.INSTANCE.get()
+            if (systemUiProxy == null) {
+                try {
+                    Class<?> proxyClass = mLauncherClassLoader.loadClass("com.android.quickstep.SystemUiProxy");
+                    java.lang.reflect.Field instanceField = proxyClass.getDeclaredField("INSTANCE");
+                    instanceField.setAccessible(true);
+                    Object daggerSingleton = instanceField.get(null);
+                    log(Log.INFO, TAG, "DaggerSingleton class: " + daggerSingleton.getClass().getName());
+
+                    // 使用 Application context 而不是 Activity context
+                    Context appCtx = ctx.getApplicationContext();
+                    log(Log.INFO, TAG, "ApplicationContext: " + appCtx
+                            + " class=" + appCtx.getClass().getName());
+
+                    // 调用 DaggerSingletonObject.get(context)
+                    java.lang.reflect.Method getMethod = daggerSingleton.getClass().getMethod("get", Context.class);
+                    systemUiProxy = getMethod.invoke(daggerSingleton, appCtx);
+                    log(Log.INFO, TAG, "Got SystemUiProxy from Dagger: " + systemUiProxy);
+                } catch (Throwable t) {
+                    log(Log.WARN, TAG, "Dagger access failed: " + t.getClass().getSimpleName()
+                            + " - " + t.getMessage());
+                    if (t.getCause() != null) {
+                        log(Log.WARN, TAG, "  Caused by: " + t.getCause().getClass().getSimpleName()
+                                + " - " + t.getCause().getMessage());
+                    }
+                }
+            }
+
+            if (systemUiProxy == null) {
+                log(Log.WARN, TAG, "SystemUiProxy is null, all methods failed");
+                return false;
+            }
+
+            // 构造 Intent
+            android.content.Intent bubbleIntent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            bubbleIntent.setData(Uri.parse("smsto:"));
+            bubbleIntent.setPackage("com.google.android.apps.messaging");
+
+            // UserHandle
+            Object userHandle = android.os.Process.class.getMethod("myUserHandle").invoke(null);
+
+            // EntryPoint.NOTIFICATION — 在 $VALUES 数组中（不是静态字段）
+            Class<?> entryPointClass = mLauncherClassLoader.loadClass("com.android.wm.shell.shared.bubbles.logging.EntryPoint");
+            Object entryPoint = null;
+            java.lang.reflect.Field valuesField = entryPointClass.getDeclaredField("$VALUES");
+            valuesField.setAccessible(true);
+            Object[] values = (Object[]) valuesField.get(null);
+            for (Object ep : values) {
+                if (ep.toString().equals("NOTIFICATION")) {
+                    entryPoint = ep;
+                    break;
+                }
+            }
+            if (entryPoint == null) {
+                log(Log.WARN, TAG, "EntryPoint.NOTIFICATION not found in $VALUES");
+                return false;
+            }
+            log(Log.INFO, TAG, "Found EntryPoint.NOTIFICATION: " + entryPoint);
+
+            // BubbleBarLocation.DEFAULT
+            Class<?> locationClass = mLauncherClassLoader.loadClass("com.android.wm.shell.shared.bubbles.BubbleBarLocation");
+            Object location = locationClass.getField("DEFAULT").get(null);
+
+            // 调用 showAppBubble — 列出所有方法并匹配
+            java.lang.reflect.Method showAppBubble = null;
+            for (java.lang.reflect.Method m : systemUiProxy.getClass().getMethods()) {
+                if (m.getName().equals("showAppBubble")) {
+                    log(Log.INFO, TAG, "Found showAppBubble: " + m.toGenericString());
+                    showAppBubble = m;
+                    break;
+                }
+            }
+
+            if (showAppBubble == null) {
+                log(Log.WARN, TAG, "showAppBubble method not found on: " + systemUiProxy.getClass().getName());
+                // 列出所有 bubble 相关方法
+                for (java.lang.reflect.Method m : systemUiProxy.getClass().getMethods()) {
+                    if (m.getName().toLowerCase().contains("bubble")) {
+                        log(Log.INFO, TAG, "  bubble method: " + m.getName() + " params=" + java.util.Arrays.toString(m.getParameterTypes()));
+                    }
+                }
+                return false;
+            }
+
+            log(Log.INFO, TAG, "Invoking showAppBubble with: intent=" + bubbleIntent
+                    + " user=" + userHandle + " entry=" + entryPoint + " loc=" + location);
+            showAppBubble.invoke(systemUiProxy, bubbleIntent, userHandle, entryPoint, location);
+            log(Log.INFO, TAG, "showAppBubble called successfully!");
+            showToast(ctx, "消息气泡已触发");
+            return true;
+
+        } catch (java.lang.reflect.InvocationTargetException ite) {
+            log(Log.ERROR, TAG, "showAppBubble InvocationTarget: " + ite.getTargetException());
+            ite.getTargetException().printStackTrace();
+            return false;
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "triggerBubbleViaSystemUiProxy failed: " + t.getClass().getSimpleName()
+                    + " - " + t.getMessage());
+            t.printStackTrace();
+            return false;
+        }
+    }
+
+    /** 在类层次结构中查找字段 */
+    private static java.lang.reflect.Field findField(Class<?> clazz, String name) {
+        while (clazz != null) {
+            try {
+                return clazz.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    /** 查找匹配参数类型的方法 */
+    private static java.lang.reflect.Method findMethod(Class<?> clazz, String name, Class<?>... paramTypes) {
+        while (clazz != null) {
+            try {
+                return clazz.getDeclaredMethod(name, paramTypes);
+            } catch (NoSuchMethodException e) {
+                clazz = clazz.getSuperclass();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 通过 Shell Binder 直接触发气泡
+     */
+    private boolean triggerBubbleViaShell(Context ctx) {
+        try {
+            Class<?> smClass = mLauncherClassLoader.loadClass("android.os.ServiceManager");
+            Method getService = smClass.getMethod("getService", String.class);
+            IBinder binder = (IBinder) getService.invoke(null, "WindowManagerShell");
+            if (binder == null) {
+                log(Log.WARN, TAG, "WindowManagerShell not available");
+                return false;
+            }
+            log(Log.INFO, TAG, "Got WindowManagerShell binder");
+
+            android.content.Intent bubbleIntent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+            bubbleIntent.setData(Uri.parse("smsto:"));
+            bubbleIntent.setPackage("com.google.android.apps.messaging");
+
+            // UserHandle via Process.myUserHandle()
+            Object userHandle = android.os.Process.class.getMethod("myUserHandle").invoke(null);
+
+            Parcel data = Parcel.obtain();
+            try {
+                data.writeInterfaceToken("com.android.wm.shell.bubbles.IBubbles");
+                data.writeTypedObject(bubbleIntent, 0);
+                data.writeTypedObject((android.os.Parcelable) userHandle, 0);
+                data.writeStrongBinder(null);
+                data.writeStrongBinder(null);
+                boolean result = binder.transact(14, data, null, android.os.IBinder.FLAG_ONEWAY);
+                log(Log.INFO, TAG, "Shell showAppBubble transact result: " + result);
+                if (result) {
+                    showToast(ctx, "消息气泡已触发 (Shell)");
+                }
+                return result;
+            } finally {
+                data.recycle();
+            }
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "triggerBubbleViaShell failed: " + t.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 显示气泡功能说明对话框
+     */
+    private void showBubbleDialog(Context ctx) {
         new android.app.AlertDialog.Builder(ctx)
                 .setTitle("消息气泡")
                 .setMessage(
-                    "消息气泡功能面板\n\n" +
+                    "消息气泡功能\n\n" +
                     "• 在屏幕底部角落显示消息气泡\n" +
                     "• 点击气泡展开消息预览\n" +
                     "• 支持拖拽排序和删除\n\n" +
                     "此模块已成功 Hook 到 Launcher\n" +
-                    "最近任务界面操作栏已添加\"消息气泡\"按钮"
+                    "请确保系统中已有支持气泡的应用（如 Google Messages）"
                 )
                 .setPositiveButton("确定", null)
                 .show();
-    }
-
-    private boolean triggerBubbleViaShell() {
-        try {
-            Class<?> smClass = Class.forName("android.os.ServiceManager");
-            Method getService = smClass.getMethod("getService", String.class);
-            IBinder binder = (IBinder) getService.invoke(null, "WindowManagerShell");
-            if (binder == null) return false;
-
-            Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
-            try {
-                data.writeInterfaceToken("android.window_shell");
-                return binder.transact(1, data, reply, 0);
-            } finally {
-                data.recycle();
-                reply.recycle();
-            }
-        } catch (Throwable t) {
-            return false;
-        }
     }
 
     private static void showToast(Context ctx, String msg) {
