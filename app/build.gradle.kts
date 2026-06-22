@@ -3,12 +3,12 @@ plugins {
 }
 
 android {
-    namespace = "com.floatwindow.bubblemodule"
+    namespace = "com.floatwindow.morebubblebutton"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
 
     defaultConfig {
-        applicationId = "com.floatwindow.bubblemodule"
+        applicationId = "com.floatwindow.morebubblebutton"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

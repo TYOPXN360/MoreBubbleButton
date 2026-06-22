@@ -1,4 +1,4 @@
-# BubbleButtonModule
+# MoreBubbleButton
 
 Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功能。
 
@@ -18,7 +18,7 @@ Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功
 
 ## 安装
 
-1. 下载 [最新 Release](https://github.com/TYOPXN360/BubbleButtonModule/releases) APK
+1. 下载 [最新 Release](https://github.com/TYOPXN360/MoreBubbleButton/releases) APK
 2. 在 LSPosed 中安装并启用
 3. 设置作用域为 `com.google.android.apps.nexuslauncher`
 4. 强制停止 Pixel Launcher 并重新打开
@@ -41,7 +41,6 @@ Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功
 | `OverviewActionsView` | `onClick` | 处理按钮点击 |
 | `OverviewActionsView` | `updateHiddenFlags` | 控制按钮可见性 |
 | `TaskMenuView` | `addMenuOptions` | 注入任务卡片菜单项 |
-| `TaskOverlayFactory` | `getEnabledShortcuts` | 菜单快捷方式扩展 |
 
 气泡触发通过 `SystemUiProxy.showAppBubble()` 调用 WMShell 的 Bubble 服务。
 

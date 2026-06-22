@@ -1,4 +1,4 @@
-package com.floatwindow.bubblemodule;
+package com.floatwindow.morebubblebutton;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
@@ -23,8 +23,8 @@ import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface.ModuleLoadedParam;
 import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam;
 
-public class BubbleHookModule extends XposedModule {
-    private static final String TAG = "BubbleModule";
+public class MoreBubbleHookModule extends XposedModule {
+    private static final String TAG = "MoreBubbleModule";
     private Object recentsViewInstance;
     private View bubbleButton;
     private View secondRow;
@@ -32,7 +32,7 @@ public class BubbleHookModule extends XposedModule {
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
-        log(Log.INFO, TAG, "onModuleLoaded: " + param.getProcessName() + " | API " + getApiVersion());
+        log(Log.INFO, TAG, "MoreBubbleModule: " + param.getProcessName() + " | API " + getApiVersion());
     }
 
     @Override
