@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.floatwindow.morebubblebutton"
-        minSdk = 26
+        minSdk = 36
         targetSdk = 36
         versionCode = 3
         versionName = "1.2"

@@ -12,7 +12,7 @@ Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功
 
 ## 要求
 
-- Android 8.0+ (API 26+)
+- Android 16+ (API 36+)
 - 已安装 LSPosed / KernelSU + Zygisk
 - Pixel Launcher (NexusLauncher)
 
