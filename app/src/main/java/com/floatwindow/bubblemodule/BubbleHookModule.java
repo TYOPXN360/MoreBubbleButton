@@ -368,67 +368,51 @@ public class BubbleHookModule extends XposedModule {
                 ((android.widget.TextView) textView).setText("消息气泡");
             }
 
-            // 关键：调用 setLayoutParamsForTaskMenuOptionItem 设置正确的布局参数
-            try {
-                java.lang.reflect.Method getTaskView = findMethod(menuView.getClass(), "getTaskView");
-                Object taskView = getTaskView != null ? getTaskView.invoke(menuView) : null;
-                if (taskView != null) {
-                    java.lang.reflect.Method getPagedOrientationHandler = findMethod(taskView.getClass(), "getPagedOrientationHandler");
-                    Object handler = getPagedOrientationHandler != null ? getPagedOrientationHandler.invoke(taskView) : null;
-                    if (handler != null) {
-                        Class<?> dpClass = mLauncherClassLoader.loadClass("com.android.launcher3.DeviceProfile");
-                        java.lang.reflect.Method setLayoutParams = findMethod(handler.getClass(),
-                                "setLayoutParamsForTaskMenuOptionItem",
-                                LinearLayout.LayoutParams.class, View.class, dpClass);
-                        if (setLayoutParams != null) {
-                            java.lang.reflect.Method getContainer = findMethod(menuView.getClass(), "getRecentsViewContainer");
-                            Object container = getContainer != null ? getContainer.invoke(menuView) : null;
-                            Object dp = null;
-                            if (container != null) {
-                                java.lang.reflect.Method getDp = findMethod(container.getClass(), "getDeviceProfile");
-                                dp = getDp != null ? getDp.invoke(container) : null;
-                            }
-                            if (dp != null) {
-                                setLayoutParams.invoke(handler, menuItem.getLayoutParams(), menuItem, dp);
-                            }
-                        }
-                    }
-                }
-            } catch (Throwable t) {
-                log(Log.WARN, TAG, "setLayoutParams failed: " + t.getMessage());
-            }
+            // 设置布局参数 — 与原菜单一致：width=MATCH_PARENT, height=WRAP_CONTENT
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) menuItem.getLayoutParams();
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            menuItem.setLayoutParams(lp);
 
-            // 点击事件 — 触发气泡 + 关闭菜单
+            // 点击事件 — 触发气泡 + 关闭菜单 + 退出多任务
             menuItem.setOnClickListener(v -> {
                 log(Log.INFO, TAG, "Bubble menu option clicked!");
                 try {
+                    // 1. 关闭菜单
+                    java.lang.reflect.Method closeMethod = findMethod(
+                            menuView.getClass(), "close", boolean.class);
+                    if (closeMethod != null) {
+                        closeMethod.invoke(menuView, true);
+                        log(Log.INFO, TAG, "Menu closed");
+                    }
+
+                    // 2. 获取任务并触发气泡
                     Object task = invokeGetter(taskContainer, "getTask");
                     if (task == null) return;
                     Object taskKey = getField(task, "key");
                     Intent taskIntent = (Intent) getField(taskKey, "baseIntent");
                     int userId = getField(taskKey, "userId") != null ? (int) getField(taskKey, "userId") : 0;
                     if (taskIntent != null) {
-                        // 先关闭菜单
-                        try {
-                            java.lang.reflect.Method closeMethod = findMethod(
-                                    menuView.getClass(), "close", boolean.class);
-                            if (closeMethod != null) {
-                                closeMethod.invoke(menuView, true);
-                                log(Log.INFO, TAG, "Menu closed via close(true)");
-                            } else {
-                                log(Log.WARN, TAG, "close method not found");
-                            }
-                        } catch (Throwable t) {
-                            log(Log.WARN, TAG, "close failed: " + t.getMessage());
-                        }
-                        // 再触发气泡
                         bubbleCurrentTask(ctx, taskIntent, userId);
                     }
-                } catch (Throwable t) { log(Log.ERROR, TAG, "Bubble menu click failed: " + t.getMessage()); }
+
+                    // 3. 退出多任务 — 延迟200ms确保气泡创建完成
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                        try {
+                            Runtime.getRuntime().exec(new String[]{
+                                    "am", "start", "-a", "android.intent.action.MAIN",
+                                    "-c", "android.intent.category.HOME"});
+                            log(Log.INFO, TAG, "dismissed via am start HOME");
+                        } catch (Throwable t) {
+                            log(Log.ERROR, TAG, "dismiss failed: " + t.getMessage());
+                        }
+                    }, 200);
+
+                } catch (Throwable t) { log(Log.ERROR, TAG, "click failed: " + t.getMessage()); }
             });
 
             optionLayout.addView(menuItem);
-            log(Log.INFO, TAG, "Bubble menu option added");
+            log(Log.INFO, TAG, "Bubble menu added: width=" + lp.width + " height=" + lp.height);
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "addBubbleMenuOption failed: " + t.getMessage());
         }
