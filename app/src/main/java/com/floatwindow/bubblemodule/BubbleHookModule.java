@@ -488,6 +488,11 @@ public class BubbleHookModule extends XposedModule {
 
             bubbleCurrentTask(ctx, taskIntent, userId);
 
+            // 退出多任务界面
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                dismissOverview(ctx);
+            }, 200);
+
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "onBubbleButtonClick failed: " + t.getMessage());
             t.printStackTrace();
