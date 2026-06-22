@@ -429,27 +429,66 @@ public class BubbleHookModule extends XposedModule {
     private void dismissOverview(Context ctx) {
         try {
             Object rv = recentsViewInstance;
-            if (rv == null) rv = findRecentsViewFromHierarchy(
-                    ((android.app.Activity) ctx).findViewById(android.R.id.content));
+            if (rv == null && ctx instanceof android.app.Activity) {
+                rv = findRecentsViewFromHierarchy(
+                        ((android.app.Activity) ctx).findViewById(android.R.id.content));
+            }
+            if (rv == null) { log(Log.WARN, TAG, "dismissOverview: RecentsView not found"); return; }
 
-            if (rv != null) {
-                // finishRecentsAnimation(toHome=true, shouldPip=false, runnable=null)
+            // 方案1: getStateManager().moveToRestState()
+            try {
+                Method getStateManager = findMethod(rv.getClass(), "getStateManager");
+                if (getStateManager != null) {
+                    Object stateManager = getStateManager.invoke(rv);
+                    if (stateManager != null) {
+                        Method moveToRest = findMethod(stateManager.getClass(), "moveToRestState");
+                        if (moveToRest != null) {
+                            moveToRest.invoke(stateManager);
+                            log(Log.INFO, TAG, "dismissed via moveToRestState");
+                            return;
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "moveToRestState failed: " + t.getMessage());
+            }
+
+            // 方案2: 通过 mContainer (RecentsWindowManager) 的 state manager
+            try {
+                java.lang.reflect.Field containerField = findField(rv.getClass(), "mContainer");
+                if (containerField != null) {
+                    containerField.setAccessible(true);
+                    Object container = containerField.get(rv);
+                    if (container != null) {
+                        Method getStateManager = findMethod(container.getClass(), "getStateManager");
+                        if (getStateManager != null) {
+                            Object stateManager = getStateManager.invoke(container);
+                            if (stateManager != null) {
+                                Method moveToRest = findMethod(stateManager.getClass(), "moveToRestState");
+                                if (moveToRest != null) {
+                                    moveToRest.invoke(stateManager);
+                                    log(Log.INFO, TAG, "dismissed via container.moveToRestState");
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "container moveToRestState failed: " + t.getMessage());
+            }
+
+            // 方案3: finishRecentsAnimation (fallback)
+            try {
                 Method m = findMethod(rv.getClass(), "finishRecentsAnimation",
                         boolean.class, boolean.class, Runnable.class);
                 if (m != null) {
                     m.invoke(rv, true, false, null);
-                    log(Log.INFO, TAG, "dismissed via finishRecentsAnimation");
-                    return;
+                    log(Log.INFO, TAG, "dismissed via finishRecentsAnimation (fallback)");
                 }
-                // fallback: startHome
-                Method startHome = findMethod(rv.getClass(), "startHome", Runnable.class);
-                if (startHome != null) {
-                    startHome.invoke(rv, (Runnable) null);
-                    log(Log.INFO, TAG, "dismissed via startHome");
-                    return;
-                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "finishRecentsAnimation fallback failed: " + t.getMessage());
             }
-            log(Log.WARN, TAG, "Could not find dismiss method");
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
         }
@@ -463,6 +502,14 @@ public class BubbleHookModule extends XposedModule {
             f.setAccessible(true);
             return f.get(obj);
         } catch (Throwable t) { return null; }
+    }
+
+    private static java.lang.reflect.Field findField(Class<?> clazz, String name) {
+        while (clazz != null) {
+            try { return clazz.getDeclaredField(name); }
+            catch (NoSuchFieldException e) { clazz = clazz.getSuperclass(); }
+        }
+        return null;
     }
 
     private static Method findMethod(Class<?> clazz, String name, Class<?>... params) {
