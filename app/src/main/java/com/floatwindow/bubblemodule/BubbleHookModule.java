@@ -334,32 +334,38 @@ public class BubbleHookModule extends XposedModule {
             Object taskContainer = getTaskContainer != null ? getTaskContainer.invoke(menuView) : null;
             if (taskContainer == null) { log(Log.WARN, TAG, "taskContainer is null"); return; }
 
-            // inflate 菜单项布局
+            // 使用与原菜单完全相同的布局和背景
             int layoutId = res.getIdentifier("task_view_menu_option", "layout", pkg);
-            if (layoutId == 0) { log(Log.WARN, TAG, "task_view_menu_option layout not found"); return; }
+            if (layoutId == 0) { log(Log.WARN, TAG, "layout not found"); return; }
 
-            ViewGroup menuItem = (ViewGroup) android.view.LayoutInflater.from(ctx).inflate(layoutId, optionLayout, false);
+            // inflate 时传入 parent 让 LayoutParams 正确匹配
+            ViewGroup menuItem = (ViewGroup) android.view.LayoutInflater.from(ctx)
+                    .inflate(layoutId, optionLayout, false);
 
-            // 设置背景
-            int bgId = res.getIdentifier("app_chip_menu_item_bg", "drawable", pkg);
-            if (bgId != 0) menuItem.setBackground(res.getDrawable(bgId, ctx.getTheme()));
+            // 保持与原菜单项完全一致的背景（布局 XML 已自带 task_menu_item_bg）
+            // 不需要额外设置背景
 
-            // 设置图标和文字
-            int iconViewId = res.getIdentifier("icon", "id", pkg);
-            int textViewId = res.getIdentifier("text", "id", pkg);
-            View iconView = iconViewId != 0 ? menuItem.findViewById(iconViewId) : null;
-            View textView = textViewId != 0 ? menuItem.findViewById(textViewId) : null;
-
-            if (iconView instanceof android.widget.ImageView) {
-                int iconResId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
-                if (iconResId == 0) iconResId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
-                if (iconResId != 0) ((android.widget.ImageView) iconView).setImageResource(iconResId);
+            // 设置图标 — icon 是 View，用 setBackground 设置可绘制图标
+            int iconId = res.getIdentifier("icon", "id", pkg);
+            View iconView = iconId != 0 ? menuItem.findViewById(iconId) : null;
+            if (iconView != null) {
+                int bubbleIconId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
+                if (bubbleIconId == 0) bubbleIconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
+                if (bubbleIconId != 0) {
+                    android.graphics.drawable.Drawable icon = res.getDrawable(bubbleIconId, ctx.getTheme());
+                    icon.setTint(res.getColor(res.getIdentifier("materialColorOnSurface", "color", pkg), ctx.getTheme()));
+                    iconView.setBackground(icon);
+                }
             }
+
+            // 设置文字
+            int textId = res.getIdentifier("text", "id", pkg);
+            View textView = textId != 0 ? menuItem.findViewById(textId) : null;
             if (textView instanceof android.widget.TextView) {
                 ((android.widget.TextView) textView).setText("消息气泡");
             }
 
-            // 点击事件 — 获取任务 Intent 并触发气泡
+            // 点击事件
             menuItem.setOnClickListener(v -> {
                 log(Log.INFO, TAG, "Bubble menu option clicked!");
                 try {
@@ -369,16 +375,17 @@ public class BubbleHookModule extends XposedModule {
                     Intent taskIntent = (Intent) getField(taskKey, "baseIntent");
                     int userId = getField(taskKey, "userId") != null ? (int) getField(taskKey, "userId") : 0;
                     if (taskIntent != null) {
-                        bubbleCurrentTask(ctx, taskIntent, userId);
-                        // 关闭菜单
+                        // 先关闭菜单
                         Method closeMenu = findMethod(menuView.getClass(), "closeMenu");
                         if (closeMenu != null) closeMenu.invoke(menuView);
+                        // 再触发气泡并退出
+                        bubbleCurrentTask(ctx, taskIntent, userId);
                     }
                 } catch (Throwable t) { log(Log.ERROR, TAG, "Bubble menu click failed: " + t.getMessage()); }
             });
 
             optionLayout.addView(menuItem);
-            log(Log.INFO, TAG, "Bubble menu option added to task menu");
+            log(Log.INFO, TAG, "Bubble menu option added");
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "addBubbleMenuOption failed: " + t.getMessage());
         }
@@ -552,83 +559,10 @@ public class BubbleHookModule extends XposedModule {
      * 退出多任务界面 — 直接调用 RecentsView.finishRecentsAnimation
      */
     private void dismissOverview(Context ctx) {
+        // 菜单 context 不是 Activity，直接用 HOME 键最可靠
         try {
-            Object rv = recentsViewInstance;
-            if (rv == null) {
-                // 从 ctx 的 Application context 查找
-                Context appCtx = ctx.getApplicationContext();
-                if (appCtx instanceof android.app.Application) {
-                    // 尝试从 Window 获取 DecorView
-                    android.app.Activity activity = null;
-                    if (ctx instanceof android.app.Activity) {
-                        activity = (android.app.Activity) ctx;
-                    } else {
-                        // 从 ContextWrapper 链中查找 Activity
-                        Context base = ctx;
-                        while (base instanceof android.content.ContextWrapper) {
-                            if (base instanceof android.app.Activity) { activity = (android.app.Activity) base; break; }
-                            base = ((android.content.ContextWrapper) base).getBaseContext();
-                        }
-                    }
-                    if (activity != null) {
-                        rv = findRecentsViewFromHierarchy(activity.findViewById(android.R.id.content));
-                    }
-                }
-            }
-            if (rv == null) {
-                // 最终方案：通过 am 命令发送 HOME
-                Runtime.getRuntime().exec(new String[]{"input", "keyevent", "KEYCODE_HOME"});
-                log(Log.INFO, TAG, "dismissed via HOME keyevent (fallback)");
-                return;
-            }
-
-            // 方案1: getStateManager().moveToRestState()
-            try {
-                Method getStateManager = findMethod(rv.getClass(), "getStateManager");
-                if (getStateManager != null) {
-                    Object stateManager = getStateManager.invoke(rv);
-                    if (stateManager != null) {
-                        Method moveToRest = findMethod(stateManager.getClass(), "moveToRestState");
-                        if (moveToRest != null) {
-                            moveToRest.invoke(stateManager);
-                            log(Log.INFO, TAG, "dismissed via moveToRestState");
-                            return;
-                        }
-                    }
-                }
-            } catch (Throwable t) {
-                log(Log.WARN, TAG, "moveToRestState failed: " + t.getMessage());
-            }
-
-            // 方案2: 通过 mContainer 的 state manager
-            try {
-                java.lang.reflect.Field containerField = findField(rv.getClass(), "mContainer");
-                if (containerField != null) {
-                    containerField.setAccessible(true);
-                    Object container = containerField.get(rv);
-                    if (container != null) {
-                        Method getStateManager = findMethod(container.getClass(), "getStateManager");
-                        if (getStateManager != null) {
-                            Object stateManager = getStateManager.invoke(container);
-                            if (stateManager != null) {
-                                Method moveToRest = findMethod(stateManager.getClass(), "moveToRestState");
-                                if (moveToRest != null) {
-                                    moveToRest.invoke(stateManager);
-                                    log(Log.INFO, TAG, "dismissed via container.moveToRestState");
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Throwable t) {
-                log(Log.WARN, TAG, "container moveToRestState failed: " + t.getMessage());
-            }
-
-            // 方案3: HOME 键
             Runtime.getRuntime().exec(new String[]{"input", "keyevent", "KEYCODE_HOME"});
             log(Log.INFO, TAG, "dismissed via HOME keyevent");
-
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
         }
