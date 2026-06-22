@@ -342,8 +342,11 @@ public class BubbleHookModule extends XposedModule {
             ViewGroup menuItem = (ViewGroup) android.view.LayoutInflater.from(ctx)
                     .inflate(layoutId, optionLayout, false);
 
-            // 保持与原菜单项完全一致的背景（布局 XML 已自带 task_menu_item_bg）
-            // 不需要额外设置背景
+            // 使用与原菜单相同的背景（带 hover/pressed 高亮效果）
+            int bgId = res.getIdentifier("app_chip_menu_item_bg", "drawable", pkg);
+            if (bgId != 0) {
+                menuItem.setBackground(res.getDrawable(bgId, ctx.getTheme()));
+            }
 
             // 设置图标 — icon 是 View，用 setBackground 设置可绘制图标
             int iconId = res.getIdentifier("icon", "id", pkg);
@@ -365,7 +368,7 @@ public class BubbleHookModule extends XposedModule {
                 ((android.widget.TextView) textView).setText("消息气泡");
             }
 
-            // 点击事件
+            // 点击事件 — 仅触发气泡，不退出多任务界面
             menuItem.setOnClickListener(v -> {
                 log(Log.INFO, TAG, "Bubble menu option clicked!");
                 try {
@@ -375,10 +378,6 @@ public class BubbleHookModule extends XposedModule {
                     Intent taskIntent = (Intent) getField(taskKey, "baseIntent");
                     int userId = getField(taskKey, "userId") != null ? (int) getField(taskKey, "userId") : 0;
                     if (taskIntent != null) {
-                        // 先关闭菜单
-                        Method closeMenu = findMethod(menuView.getClass(), "closeMenu");
-                        if (closeMenu != null) closeMenu.invoke(menuView);
-                        // 再触发气泡并退出
                         bubbleCurrentTask(ctx, taskIntent, userId);
                     }
                 } catch (Throwable t) { log(Log.ERROR, TAG, "Bubble menu click failed: " + t.getMessage()); }
@@ -543,8 +542,6 @@ public class BubbleHookModule extends XposedModule {
                     m.invoke(systemUiProxy, bubbleIntent, userHandle, entryPoint, null);
                     log(Log.INFO, TAG, "showAppBubble succeeded!");
                     showToast(ctx, "消息气泡已触发");
-                    // 立即退出多任务界面
-                    dismissOverview(ctx);
                     return true;
                 }
             }
