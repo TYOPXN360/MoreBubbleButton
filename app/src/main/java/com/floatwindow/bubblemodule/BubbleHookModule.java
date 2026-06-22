@@ -2,6 +2,7 @@ package com.floatwindow.bubblemodule;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.graphics.Rect;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
@@ -9,6 +10,7 @@ import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
@@ -21,16 +23,18 @@ import io.github.libxposed.api.XposedModuleInterface.PackageLoadedParam;
 /**
  * BubbleHookModule — 在 Pixel Launcher 最近任务界面添加"消息气泡"按钮
  *
- * 参考 PLenhanced 的 ClearAllButton.kt 实现模式：
- * - Hook OverviewActionsView.onFinishInflate (基类，不是 NexusOverviewActionsView)
- * - 通过反射获取 mActionButtons 字段
- * - 使用 Launcher 的 OverviewActionButton 样式
+ * 关键点：
+ * - NexusOverviewActionsView 是 FrameLayout，子 View 会重叠，必须用 LayoutParams 定位
+ * - 清除所有按钮 (ClearAllButton) 不计入溢出阈值
+ * - 只在 overview/recents 状态下显示
  */
 public class BubbleHookModule extends XposedModule {
     private static final String TAG = "BubbleModule";
 
     private Object recentsViewInstance;
     private View bubbleButton;
+    private View secondRow;
+    private boolean isInOverview = false;
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
@@ -43,7 +47,6 @@ public class BubbleHookModule extends XposedModule {
         String pkg = param.getPackageName();
         log(Log.INFO, TAG, "onPackageLoaded: " + pkg);
 
-        // Hook Launcher 进程
         if ("com.google.android.apps.nexuslauncher".equals(pkg)
                 || "com.android.launcher3".equals(pkg)) {
             hookLauncher(param);
@@ -52,16 +55,14 @@ public class BubbleHookModule extends XposedModule {
 
     private void hookLauncher(PackageLoadedParam param) {
         ClassLoader cl = param.getDefaultClassLoader();
-        log(Log.INFO, TAG, "ClassLoader: " + cl);
 
-        // 1. Hook RecentsView 构造函数，保存实例
+        // 1. Hook RecentsView 构造函数
         try {
             Class<?> recentsViewClass = cl.loadClass(
                     "com.android.quickstep.views.RecentsView");
             hook(recentsViewClass.getConstructor(Context.class)).intercept(chain -> {
                 Object ret = chain.proceed();
                 recentsViewInstance = chain.getThisObject();
-                log(Log.INFO, TAG, "RecentsView instance captured");
                 return ret;
             });
             log(Log.INFO, TAG, "Hooked RecentsView constructor");
@@ -73,8 +74,6 @@ public class BubbleHookModule extends XposedModule {
         try {
             Class<?> overviewActionsClass = cl.loadClass(
                     "com.android.quickstep.views.OverviewActionsView");
-            log(Log.INFO, TAG, "Loaded OverviewActionsView: " + overviewActionsClass);
-
             hook(overviewActionsClass.getMethod("onFinishInflate")).intercept(chain -> {
                 Object ret = chain.proceed();
                 try {
@@ -85,12 +84,11 @@ public class BubbleHookModule extends XposedModule {
                 return ret;
             });
             log(Log.INFO, TAG, "Hooked OverviewActionsView.onFinishInflate OK");
-
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook OverviewActionsView", t);
         }
 
-        // 3. Hook OverviewActionsView.onClick — 拦截点击
+        // 3. Hook OverviewActionsView.onClick
         try {
             Class<?> overviewActionsClass = cl.loadClass(
                     "com.android.quickstep.views.OverviewActionsView");
@@ -99,7 +97,7 @@ public class BubbleHookModule extends XposedModule {
                 if (v != null && bubbleButton != null && v.getId() == bubbleButton.getId()) {
                     log(Log.INFO, TAG, ">>> Bubble button clicked!");
                     onBubbleButtonClick((View) chain.getThisObject());
-                    return null; // 消费事件
+                    return null;
                 }
                 return chain.proceed();
             });
@@ -107,201 +105,317 @@ public class BubbleHookModule extends XposedModule {
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook onClick", t);
         }
+
+        // 4. Hook OverviewActionsView.updateHiddenFlags — 控制可见性
+        try {
+            Class<?> overviewActionsClass = cl.loadClass(
+                    "com.android.quickstep.views.OverviewActionsView");
+            hook(overviewActionsClass.getMethod("updateHiddenFlags", int.class, boolean.class))
+                    .intercept(chain -> {
+                        Object ret = chain.proceed();
+                        try {
+                            updateBubbleVisibility(chain.getThisObject());
+                        } catch (Throwable t) {
+                            log(Log.ERROR, TAG, "updateBubbleVisibility failed", t);
+                        }
+                        return ret;
+                    });
+            log(Log.INFO, TAG, "Hooked updateHiddenFlags OK");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook updateHiddenFlags", t);
+        }
+
+        // 5. Hook RecentsState.hasClearAllButton — 了解 overview 状态
+        try {
+            Class<?> recentsStateClass = cl.loadClass(
+                    "com.android.quickstep.fallback.RecentsState");
+            hook(recentsStateClass.getMethod("hasClearAllButton")).intercept(chain -> {
+                boolean ret = (boolean) chain.proceed();
+                log(Log.INFO, TAG, "hasClearAllButton=" + ret);
+                return ret;
+            });
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "Failed to hook RecentsState: " + t.getMessage());
+        }
     }
 
     /**
-     * 注入"消息气泡"按钮 — 参考 ClearAllButton.kt 的实现
-     * 若按钮过多则迁移到第二行并居中
+     * 控制气泡按钮可见性 — 只在 overview 状态下显示
+     */
+    private void updateBubbleVisibility(Object actionsView) {
+        if (secondRow == null || bubbleButton == null) return;
+
+        try {
+            // mHiddenFlags 在父类 OverviewActionsView 中，需要遍历类层次结构
+            int hiddenFlags = -1;
+            Class<?> clazz = actionsView.getClass();
+            while (clazz != null) {
+                try {
+                    java.lang.reflect.Field hiddenField = clazz.getDeclaredField("mHiddenFlags");
+                    hiddenField.setAccessible(true);
+                    hiddenFlags = hiddenField.getInt(actionsView);
+                    break;
+                } catch (NoSuchFieldException e) {
+                    clazz = clazz.getSuperclass();
+                }
+            }
+
+            if (hiddenFlags == -1) {
+                log(Log.WARN, TAG, "mHiddenFlags not found in class hierarchy");
+                return;
+            }
+
+            // hiddenFlags == 0 表示在 overview 状态（操作栏可见）
+            boolean shouldShow = (hiddenFlags == 0);
+            int visibility = shouldShow ? View.VISIBLE : View.INVISIBLE;
+
+            log(Log.INFO, TAG, "updateBubbleVisibility: hiddenFlags=" + hiddenFlags
+                    + " shouldShow=" + shouldShow);
+
+            secondRow.setVisibility(visibility);
+            bubbleButton.setVisibility(visibility);
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "updateBubbleVisibility error: " + t.getMessage());
+        }
+    }
+
+    /**
+     * 注入"消息气泡"按钮
      */
     @SuppressLint("DiscouragedApi")
     private void injectBubbleButton(Object actionsView, ClassLoader cl) {
         Context ctx = ((View) actionsView).getContext();
-        Context launcherCtx = ctx;
         android.content.res.Resources launcherRes = ctx.getResources();
         String launcherPkg = ctx.getPackageName();
 
         log(Log.INFO, TAG, "injectBubbleButton: pkg=" + launcherPkg);
 
-        // 获取 mActionButtons (LinearLayout) — 三种方式
+        // ===== 获取 action_buttons =====
         LinearLayout mActionButtons = null;
-        try {
-            java.lang.reflect.Field field = actionsView.getClass().getDeclaredField("mActionButtons");
-            field.setAccessible(true);
-            mActionButtons = (LinearLayout) field.get(actionsView);
-        } catch (Throwable t) {
-            log(Log.WARN, TAG, "Field access failed: " + t.getMessage());
+        int abId = launcherRes.getIdentifier("action_buttons", "id", launcherPkg);
+        if (abId != 0) {
+            mActionButtons = ((View) actionsView).findViewById(abId);
         }
         if (mActionButtons == null) {
-            int abId = launcherRes.getIdentifier("action_buttons", "id", launcherPkg);
-            if (abId != 0) {
-                mActionButtons = ((View) actionsView).findViewById(abId);
-            }
-        }
-        if (mActionButtons == null && actionsView instanceof ViewGroup) {
-            ViewGroup vg = (ViewGroup) actionsView;
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                View child = vg.getChildAt(i);
-                if (child instanceof LinearLayout) {
-                    mActionButtons = (LinearLayout) child;
-                    break;
-                }
-            }
-        }
-        if (mActionButtons == null) {
-            log(Log.ERROR, TAG, "Failed to find mActionButtons!");
+            log(Log.ERROR, TAG, "action_buttons not found!");
             return;
         }
+        log(Log.INFO, TAG, "action_buttons: " + mActionButtons + " children=" + mActionButtons.getChildCount());
 
-        // 统计已有的可见按钮数量（排除已注入的气泡按钮）
+        // ===== 统计可见的"原始"按钮数（排除 ClearAllButton 和气泡按钮） =====
         int visibleButtonCount = 0;
         for (int i = 0; i < mActionButtons.getChildCount(); i++) {
             View child = mActionButtons.getChildAt(i);
-            if (child.getVisibility() == View.VISIBLE && child instanceof Button
-                    && (child.getTag() == null || !"bubble_button".equals(child.getTag()))) {
-                visibleButtonCount++;
+            if (child.getVisibility() != View.VISIBLE) continue;
+            if (!(child instanceof Button)) continue;
+            // 排除气泡按钮
+            if (child.getTag() != null && "bubble_button".equals(child.getTag())) continue;
+            // 排除 ClearAllButton（PLenhanced 模块的）
+            if (isClearAllButton(child)) {
+                log(Log.INFO, TAG, "  Skipping ClearAllButton: " + child);
+                continue;
             }
+            visibleButtonCount++;
+            log(Log.INFO, TAG, "  Button " + visibleButtonCount + ": "
+                    + child.getClass().getSimpleName() + " id=" + Integer.toHexString(child.getId()));
         }
-        log(Log.INFO, TAG, "Visible existing buttons: " + visibleButtonCount);
+        log(Log.INFO, TAG, "Visible original buttons: " + visibleButtonCount);
 
-        // 创建按钮 — 使用 Launcher 的样式
-        int themeId = launcherRes.getIdentifier(
-                "ThemeControlHighlightWorkspaceColor", "style", launcherPkg);
-        int styleId = launcherRes.getIdentifier(
-                "OverviewActionButton", "style", launcherPkg);
+        // ===== 创建气泡按钮 =====
+        Button btn = createBubbleButton(ctx, launcherRes, launcherPkg);
 
-        android.view.ContextThemeWrapper contextThemeWrapper =
-                new android.view.ContextThemeWrapper(launcherCtx,
+        // ===== 判断是否需要第二行 =====
+        ViewGroup actionsParent = (ViewGroup) actionsView;
+        boolean needSecondRow = visibleButtonCount >= 3;
+
+        if (needSecondRow) {
+            log(Log.INFO, TAG, "Overflow (" + visibleButtonCount + " >= 3), creating second row");
+            ensureSecondRow(actionsParent, btn, launcherRes, launcherPkg);
+        } else {
+            log(Log.INFO, TAG, "Fits (" + visibleButtonCount + " < 3), adding to action_buttons");
+            btn.setTag("bubble_button");
+            int spacingId = launcherRes.getIdentifier(
+                    "overview_actions_button_spacing", "dimen", launcherPkg);
+            ViewGroup.MarginLayoutParams mlp = new ViewGroup.MarginLayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (spacingId != 0) {
+                mlp.setMarginStart(launcherRes.getDimensionPixelSize(spacingId));
+            }
+            btn.setLayoutParams(mlp);
+            mActionButtons.addView(btn);
+            bubbleButton = btn;
+        }
+
+        log(Log.INFO, TAG, "=== Bubble button ready ===");
+    }
+
+    /**
+     * 检查是否是 ClearAllButton（PLenhanced 模块的按钮）
+     */
+    private boolean isClearAllButton(View child) {
+        String className = child.getClass().getName();
+        // ClearAllButton 的类名
+        if (className.contains("ClearAllButton")) return true;
+        // PLenhanced 的 ClearAllButton 资源 ID
+        if (child.getId() == 0x7f0a0107) return true; // R.id.clear_all
+        // 检查 classLoader 中的类名
+        try {
+            Class<?> clearAllClass = child.getClass().getClassLoader()
+                    .loadClass("com.android.quickstep.views.ClearAllButton");
+            return clearAllClass.isInstance(child);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 创建气泡按钮
+     */
+    @SuppressLint("DiscouragedApi")
+    private Button createBubbleButton(Context ctx, android.content.res.Resources res, String pkg) {
+        int themeId = res.getIdentifier(
+                "ThemeControlHighlightWorkspaceColor", "style", pkg);
+        int styleId = res.getIdentifier(
+                "OverviewActionButton", "style", pkg);
+
+        android.view.ContextThemeWrapper ctxTheme =
+                new android.view.ContextThemeWrapper(ctx,
                         themeId != 0 ? themeId : android.R.style.Theme_DeviceDefault);
 
-        Button btn;
-        if (styleId != 0) {
-            btn = new Button(contextThemeWrapper, null, 0, styleId);
-        } else {
-            btn = new Button(contextThemeWrapper);
-        }
+        Button btn = (styleId != 0)
+                ? new Button(ctxTheme, null, 0, styleId)
+                : new Button(ctxTheme);
 
         btn.setText("消息气泡");
         btn.setContentDescription("消息气泡");
+        btn.setId(View.generateViewId());
+        btn.setTag("bubble_button");
 
-        // 设置图标
-        int iconId = launcherRes.getIdentifier("ic_bubble_button", "drawable", launcherPkg);
-        if (iconId == 0) iconId = launcherRes.getIdentifier("ic_bubble_bar", "drawable", launcherPkg);
-        if (iconId == 0) iconId = launcherRes.getIdentifier("bubble_ic_overflow_button", "drawable", launcherPkg);
+        // 图标
+        int iconId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
+        if (iconId == 0) iconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
+        if (iconId == 0) iconId = res.getIdentifier("bubble_ic_overflow_button", "drawable", pkg);
         if (iconId != 0) {
-            android.graphics.drawable.Drawable icon = launcherRes.getDrawable(iconId, null);
+            android.graphics.drawable.Drawable icon = res.getDrawable(iconId, null);
             if (icon != null) {
                 btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
             }
         }
 
-        btn.setId(View.generateViewId());
-
-        // 复制已有按钮的 background
-        for (int i = 0; i < mActionButtons.getChildCount(); i++) {
-            View child = mActionButtons.getChildAt(i);
-            if (child instanceof Button && child != bubbleButton) {
-                android.graphics.drawable.Drawable bg = child.getBackground();
-                if (bg != null) {
-                    btn.setBackground(bg.getConstantState().newDrawable());
-                }
-                break;
-            }
+        // 复制 background
+        for (int i = 0; i < 10; i++) {
+            View sibling = ((View) btn.getParent() != null)
+                    ? null // 还没加入 parent
+                    : null;
+            break;
         }
 
-        // 点击事件
-        btn.setOnClickListener(v -> onBubbleButtonClick((View) actionsView));
+        // 点击
+        btn.setOnClickListener(v -> {
+            View actionsView = (View) btn.getParent().getParent();
+            if (actionsView == null) actionsView = (View) btn.getParent();
+            onBubbleButtonClick(actionsView);
+        });
 
-        // 去重检查
-        boolean alreadyInjected = false;
-        for (int i = 0; i < mActionButtons.getChildCount(); i++) {
-            View child = mActionButtons.getChildAt(i);
-            if (child != null && child.getTag() != null
-                    && "bubble_button".equals(child.getTag())) {
-                alreadyInjected = true;
-                log(Log.INFO, TAG, "Bubble button already exists, skipping");
-                bubbleButton = child;
-                break;
-            }
-        }
-        if (alreadyInjected) return;
+        return btn;
+    }
 
-        // ===== 核心逻辑：判断是否需要迁移到第二行 =====
-        // 阈值：一行最多放 3 个按钮（截图 + 选择 + 分屏 = 3个原有按钮）
-        int maxButtonsPerRow = 3;
-        ViewGroup actionsParent = (ViewGroup) ((View) actionsView);
-        boolean needSecondRow = visibleButtonCount >= maxButtonsPerRow;
+    /**
+     * 确保第二行存在，并将按钮放入其中
+     * NexusOverviewActionsView 是 FrameLayout，需要用 FrameLayout.LayoutParams 精确定位
+     */
+    @SuppressLint("DiscouragedApi")
+    private void ensureSecondRow(ViewGroup actionsParent, Button btn,
+            android.content.res.Resources res, String pkg) {
 
-        if (needSecondRow) {
-            log(Log.INFO, TAG, "Too many buttons (" + visibleButtonCount
-                    + "), creating centered second row");
-
-            // 查找或创建第二行容器
-            LinearLayout secondRow = null;
-            for (int i = 0; i < actionsParent.getChildCount(); i++) {
-                View child = actionsParent.getChildAt(i);
-                if (child instanceof LinearLayout && child.getTag() != null
-                        && "bubble_second_row".equals(child.getTag())) {
-                    secondRow = (LinearLayout) child;
+        // 查找已有的第二行
+        if (secondRow != null && secondRow.getParent() == actionsParent) {
+            // 已存在，检查是否需要重新注入
+            boolean alreadyHas = false;
+            for (int i = 0; i < ((ViewGroup) secondRow).getChildCount(); i++) {
+                View child = ((ViewGroup) secondRow).getChildAt(i);
+                if (child.getTag() != null && "bubble_button".equals(child.getTag())) {
+                    alreadyHas = true;
+                    bubbleButton = child;
                     break;
                 }
             }
-
-            if (secondRow == null) {
-                secondRow = new LinearLayout(launcherCtx);
-                secondRow.setTag("bubble_second_row");
-                secondRow.setOrientation(LinearLayout.HORIZONTAL);
-                secondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-
-                // 从 action_buttons 复制 margin 和 padding 信息
-                ViewGroup.MarginLayoutParams rowMlp = new ViewGroup.MarginLayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT);
-
-                // 获取 action_buttons 的 bottom margin 以定位第二行
-                // 第二行放在 action_buttons 之后
-                int insertIndex = actionsParent.indexOfChild(mActionButtons) + 1;
-                actionsParent.addView(secondRow, insertIndex, rowMlp);
-                log(Log.INFO, TAG, "Created second row at index=" + insertIndex);
+            if (alreadyHas) {
+                log(Log.INFO, TAG, "Second row already has bubble button");
+                return;
             }
-
-            // 按钮放入第二行，居中
+            // 添加按钮到已有的第二行
             ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
-            int spacingId = launcherRes.getIdentifier(
-                    "overview_actions_button_spacing", "dimen", launcherPkg);
+            int spacingId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
             if (spacingId != 0) {
-                btnMlp.setMarginStart(launcherRes.getDimensionPixelSize(spacingId));
+                btnMlp.setMarginStart(res.getDimensionPixelSize(spacingId));
             }
             btn.setLayoutParams(btnMlp);
-            btn.setTag("bubble_button");
-            secondRow.addView(btn);
+            ((ViewGroup) secondRow).addView(btn);
             bubbleButton = btn;
-
-            log(Log.INFO, TAG, "=== Bubble button in second row! children="
-                    + secondRow.getChildCount() + " ===");
-
-        } else {
-            log(Log.INFO, TAG, "Buttons fit in one row (" + visibleButtonCount
-                    + "), adding to action_buttons");
-
-            // 正常添加到 action_buttons
-            ViewGroup.MarginLayoutParams mlp = new ViewGroup.MarginLayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
-            int spacingId = launcherRes.getIdentifier(
-                    "overview_actions_button_spacing", "dimen", launcherPkg);
-            if (spacingId != 0) {
-                mlp.setMarginStart(launcherRes.getDimensionPixelSize(spacingId));
-            }
-            btn.setLayoutParams(mlp);
-            btn.setTag("bubble_button");
-            mActionButtons.addView(btn);
-            bubbleButton = btn;
-
-            log(Log.INFO, TAG, "=== Bubble button in first row! children="
-                    + mActionButtons.getChildCount() + " ===");
+            return;
         }
+
+        // 创建新的第二行 LinearLayout（居中）
+        LinearLayout newSecondRow = new LinearLayout(
+                new android.view.ContextThemeWrapper(actionsParent.getContext(),
+                        android.R.style.Theme_DeviceDefault));
+        newSecondRow.setTag("bubble_second_row");
+        newSecondRow.setOrientation(LinearLayout.HORIZONTAL);
+        newSecondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+
+        // 按钮参数
+        ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        int spacingId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
+        if (spacingId != 0) {
+            btnMlp.setMarginStart(res.getDimensionPixelSize(spacingId));
+        }
+        btn.setLayoutParams(btnMlp);
+        newSecondRow.addView(btn);
+        bubbleButton = btn;
+
+        // 关键：用 FrameLayout.LayoutParams 精确定位在 action_buttons 下方
+        // 找到 action_buttons 的位置
+        int actionButtonsId = res.getIdentifier("action_buttons", "id", pkg);
+        View actionButtonsView = actionsParent.findViewById(actionButtonsId);
+
+        FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
+
+        // 在 FrameLayout 中，用 topMargin 把第二行推到 action_buttons 下方
+        if (actionButtonsView != null) {
+            actionButtonsView.post(() -> {
+                int actionBottom = actionButtonsView.getBottom();
+                // 加上 action_buttons 的 top margin（相对于 parent）
+                int[] loc = new int[2];
+                actionButtonsView.getLocationOnScreen(loc);
+                int[] parentLoc = new int[2];
+                actionsParent.getLocationOnScreen(parentLoc);
+                int relativeBottom = loc[1] - parentLoc[1] + actionButtonsView.getHeight();
+
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
+                lp.topMargin = relativeBottom;
+                newSecondRow.setLayoutParams(lp);
+                log(Log.INFO, TAG, "Second row topMargin=" + relativeBottom);
+            });
+        }
+
+        // 插入到 actionsParent 中，位于 action_buttons 之后
+        int insertIndex = 0;
+        if (actionButtonsView != null) {
+            insertIndex = actionsParent.indexOfChild(actionButtonsView) + 1;
+        }
+        actionsParent.addView(newSecondRow, insertIndex, rowLp);
+        secondRow = newSecondRow;
+
+        log(Log.INFO, TAG, "Created second row at index=" + insertIndex);
     }
 
     /**
@@ -311,13 +425,11 @@ public class BubbleHookModule extends XposedModule {
         Context ctx = actionsView.getContext();
         log(Log.INFO, TAG, "Bubble button clicked!");
 
-        // 1. 尝试通过 Shell Binder 触发
         if (triggerBubbleViaShell()) {
             showToast(ctx, "气泡栏已触发 (Shell)");
             return;
         }
 
-        // 2. 尝试启动气泡设置
         try {
             android.content.Intent intent = new android.content.Intent(
                     "android.settings.BUBBLE_NOTIFICATION_SETTINGS");
@@ -329,7 +441,6 @@ public class BubbleHookModule extends XposedModule {
             log(Log.WARN, TAG, "Bubble settings not available: " + t.getMessage());
         }
 
-        // 3. 显示对话框
         new android.app.AlertDialog.Builder(ctx)
                 .setTitle("消息气泡")
                 .setMessage(
@@ -349,25 +460,18 @@ public class BubbleHookModule extends XposedModule {
             Class<?> smClass = Class.forName("android.os.ServiceManager");
             Method getService = smClass.getMethod("getService", String.class);
             IBinder binder = (IBinder) getService.invoke(null, "WindowManagerShell");
-            if (binder == null) {
-                log(Log.WARN, TAG, "WindowManagerShell not available");
-                return false;
-            }
-            log(Log.INFO, TAG, "Got WindowManagerShell binder");
+            if (binder == null) return false;
 
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             try {
                 data.writeInterfaceToken("android.window_shell");
-                boolean result = binder.transact(1, data, reply, 0);
-                log(Log.INFO, TAG, "Shell transact result: " + result);
-                return result;
+                return binder.transact(1, data, reply, 0);
             } finally {
                 data.recycle();
                 reply.recycle();
             }
         } catch (Throwable t) {
-            log(Log.WARN, TAG, "Shell trigger failed: " + t.getMessage());
             return false;
         }
     }
@@ -375,26 +479,5 @@ public class BubbleHookModule extends XposedModule {
     private static void showToast(Context ctx, String msg) {
         new android.os.Handler(Looper.getMainLooper()).post(() ->
                 Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show());
-    }
-
-    /** 打印 View 层级结构（调试用） */
-    private void printViewHierarchy(View view, String indent) {
-        String info = indent + view.getClass().getSimpleName()
-                + " id=" + Integer.toHexString(view.getId())
-                + " vis=" + view.getVisibility();
-        if (view instanceof ViewGroup) {
-            info += " children=" + ((ViewGroup) view).getChildCount();
-        }
-        if (view instanceof Button) {
-            info += " text=" + ((Button) view).getText();
-        }
-        log(Log.INFO, TAG, info);
-
-        if (view instanceof ViewGroup) {
-            ViewGroup vg = (ViewGroup) view;
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                printViewHierarchy(vg.getChildAt(i), indent + "  ");
-            }
-        }
     }
 }
