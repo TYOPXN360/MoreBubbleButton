@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MoreBubbleButton</string>
+    <string name="module_description">Add a \"Message Bubble\" button to the Pixel Launcher recents view, allowing you to turn the current app into a bubble.</string>
 </resources>

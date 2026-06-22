@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">更多消息气泡</string>
+    <string name="module_description">在 Pixel Launcher 最近任务界面添加「消息气泡」按钮，点击后可将当前应用变为消息气泡模式。</string>
 </resources>
