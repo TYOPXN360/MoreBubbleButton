@@ -411,6 +411,8 @@ public class BubbleHookModule extends XposedModule {
                     m.invoke(systemUiProxy, bubbleIntent, userHandle, entryPoint, null);
                     log(Log.INFO, TAG, "showAppBubble succeeded!");
                     showToast(ctx, "消息气泡已触发");
+                    // 立即退出多任务界面
+                    dismissOverview(ctx);
                     return true;
                 }
             }
@@ -419,6 +421,44 @@ public class BubbleHookModule extends XposedModule {
             log(Log.ERROR, TAG, "bubbleCurrentTask failed: " + t.getMessage());
         }
         return false;
+    }
+
+    /**
+     * 退出多任务界面
+     */
+    private void dismissOverview(Context ctx) {
+        try {
+            // 方法1: 通过 RecentsView 调用 finishRecentsAnimation
+            if (recentsViewInstance != null) {
+                Method finishRecents = findMethod(recentsViewInstance.getClass(), "finishRecentsAnimation", boolean.class, boolean.class);
+                if (finishRecents != null) {
+                    finishRecents.invoke(recentsViewInstance, true, false);
+                    log(Log.INFO, TAG, "dismissed overview via finishRecentsAnimation");
+                    return;
+                }
+                // 尝试 onDismiss
+                Method onDismiss = findMethod(recentsViewInstance.getClass(), "onDismiss");
+                if (onDismiss != null) {
+                    onDismiss.invoke(recentsViewInstance);
+                    log(Log.INFO, TAG, "dismissed overview via onDismiss");
+                    return;
+                }
+            }
+
+            // 方法2: 通过 am 命令发送 HOME
+            android.os.Handler handler = new android.os.Handler(Looper.getMainLooper());
+            handler.postDelayed(() -> {
+                try {
+                    Runtime.getRuntime().exec(new String[]{"input", "keyevent", "KEYCODE_HOME"});
+                    log(Log.INFO, TAG, "dismissed overview via HOME keyevent");
+                } catch (Throwable t) {
+                    log(Log.ERROR, TAG, "HOME keyevent failed: " + t.getMessage());
+                }
+            }, 300);
+
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
+        }
     }
 
     // ==================== 工具方法 ====================
