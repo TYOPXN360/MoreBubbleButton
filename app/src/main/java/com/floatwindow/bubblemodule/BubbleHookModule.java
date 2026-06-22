@@ -396,20 +396,28 @@ public class BubbleHookModule extends XposedModule {
                         bubbleCurrentTask(ctx, taskIntent, userId);
                     }
 
-                    // 3. 退出多任务 — 延迟200ms确保气泡创建完成
+                    // 3. 退出多任务
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        try {
-                            Runtime.getRuntime().exec(new String[]{
-                                    "am", "start", "-a", "android.intent.action.MAIN",
-                                    "-c", "android.intent.category.HOME"});
-                            log(Log.INFO, TAG, "dismissed via am start HOME");
-                        } catch (Throwable t) {
-                            log(Log.ERROR, TAG, "dismiss failed: " + t.getMessage());
-                        }
+                        dismissOverview(ctx);
                     }, 200);
 
                 } catch (Throwable t) { log(Log.ERROR, TAG, "click failed: " + t.getMessage()); }
             });
+
+            // 在注入时捕获 RecentsView 实例
+            try {
+                java.lang.reflect.Method getTaskViewM = findMethod(menuView.getClass(), "getTaskView");
+                Object tv = getTaskViewM != null ? getTaskViewM.invoke(menuView) : null;
+                if (tv != null) {
+                    java.lang.reflect.Method getRecentsViewM = findMethod(tv.getClass(), "getRecentsView");
+                    if (getRecentsViewM != null) {
+                        recentsViewInstance = getRecentsViewM.invoke(tv);
+                        log(Log.INFO, TAG, "Captured RecentsView: " + recentsViewInstance);
+                    }
+                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "Capture RecentsView failed: " + t.getMessage());
+            }
 
             optionLayout.addView(menuItem);
             log(Log.INFO, TAG, "Bubble menu added: width=" + lp.width + " height=" + lp.height);
@@ -585,11 +593,86 @@ public class BubbleHookModule extends XposedModule {
      */
     private void dismissOverview(Context ctx) {
         try {
-            // 用 am start HOME 比 input keyevent 更可靠
+            // 方案1: 从 View 层级查找 RecentsView（从菜单的 parent 链向上查找）
+            Object rv = recentsViewInstance;
+            if (rv == null) {
+                try {
+                    Class<?> recentsViewClass = mLauncherClassLoader.loadClass(
+                            "com.android.quickstep.views.RecentsView");
+                    // 从 ctx 的所有 View 中递归查找
+                    if (ctx instanceof android.content.ContextWrapper) {
+                        Context base = ctx;
+                        while (base instanceof android.content.ContextWrapper) {
+                            if (base instanceof android.app.Activity) {
+                                android.view.View contentView = ((android.app.Activity) base).findViewById(android.R.id.content);
+                                if (contentView != null) {
+                                    rv = findRecentsViewInTree(contentView, recentsViewClass);
+                                    if (rv != null) recentsViewInstance = rv;
+                                }
+                                break;
+                            }
+                            base = ((android.content.ContextWrapper) base).getBaseContext();
+                        }
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            if (rv != null) {
+                // 方案1: moveToRestState
+                try {
+                    Method getStateManager = findMethod(rv.getClass(), "getStateManager");
+                    if (getStateManager != null) {
+                        Object sm = getStateManager.invoke(rv);
+                        if (sm != null) {
+                            Method moveToRest = findMethod(sm.getClass(), "moveToRestState");
+                            if (moveToRest != null) {
+                                moveToRest.invoke(sm);
+                                log(Log.INFO, TAG, "dismissed via moveToRestState");
+                                return;
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    log(Log.WARN, TAG, "moveToRestState failed: " + t.getMessage());
+                }
+
+                // 方案2: finishRecentsAnimation
+                try {
+                    Method finishRecents = findMethod(rv.getClass(), "finishRecentsAnimation",
+                            boolean.class, boolean.class, Runnable.class);
+                    if (finishRecents != null) {
+                        finishRecents.invoke(rv, true, false, null);
+                        log(Log.INFO, TAG, "dismissed via finishRecentsAnimation");
+                        return;
+                    }
+                } catch (Throwable t) {
+                    log(Log.WARN, TAG, "finishRecentsAnimation failed: " + t.getMessage());
+                }
+            }
+
+            // 方案3: 通过 Launcher 的状态管理器
+            try {
+                Class<?> launcherClass = mLauncherClassLoader.loadClass("com.android.launcher3.Launcher");
+                // 遍历 Activity 栈找到 Launcher
+                android.app.ActivityManager am = (android.app.ActivityManager) ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE);
+                java.util.List<android.app.ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(10);
+                for (android.app.ActivityManager.RunningTaskInfo task : tasks) {
+                    if (task.topActivity != null && task.topActivity.getClassName().contains("Launcher")) {
+                        // 找到 Launcher Activity，获取其 state manager
+                        log(Log.INFO, TAG, "Found Launcher task: " + task.topActivity);
+                        break;
+                    }
+                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "Launcher search failed: " + t.getMessage());
+            }
+
+            // 方案4: am start HOME — 兜底
             Runtime.getRuntime().exec(new String[]{
                     "am", "start", "-a", "android.intent.action.MAIN",
                     "-c", "android.intent.category.HOME"});
             log(Log.INFO, TAG, "dismissed via am start HOME");
+
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
         }
