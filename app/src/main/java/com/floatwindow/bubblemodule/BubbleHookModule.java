@@ -577,7 +577,6 @@ public class BubbleHookModule extends XposedModule {
                     log(Log.INFO, TAG, "Calling showAppBubble: " + bubbleIntent);
                     m.invoke(systemUiProxy, bubbleIntent, userHandle, entryPoint, null);
                     log(Log.INFO, TAG, "showAppBubble succeeded!");
-                    showToast(ctx, "消息气泡已触发");
                     return true;
                 }
             }
