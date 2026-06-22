@@ -15,8 +15,6 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
-
 import java.lang.reflect.Method;
 
 import io.github.libxposed.api.XposedModule;
@@ -41,18 +39,25 @@ public class BubbleHookModule extends XposedModule {
     private static final int BUBBLE_BTN_ID = 0x7f0b9999;
 
     @Override
-    public void onModuleLoaded(@NonNull ModuleLoadedParam param) {
+    public void onModuleLoaded(ModuleLoadedParam param) {
         log(Log.INFO, TAG, "BubbleModule loaded in: " + param.getProcessName()
                 + " | API " + getApiVersion());
     }
 
     @Override
-    public void onPackageLoaded(@NonNull PackageLoadedParam param) {
+    public void onPackageLoaded(PackageLoadedParam param) {
         String pkg = param.getPackageName();
         if (!"com.google.android.apps.nexuslauncher".equals(pkg)) return;
 
         log(Log.INFO, TAG, "Package loaded: " + pkg);
-        hookNexusOverviewActions(param.getClassLoader());
+        // 通过反射获取 classLoader，因为 API 102 中方法名可能不同
+        try {
+            java.lang.reflect.Method getCl = param.getClass().getMethod("getClassLoader");
+            ClassLoader cl = (ClassLoader) getCl.invoke(param);
+            hookNexusOverviewActions(cl);
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to get classloader", t);
+        }
     }
 
     // ==================== Hook 入口 ====================

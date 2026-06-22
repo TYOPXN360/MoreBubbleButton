@@ -1,0 +1,7 @@
+#Mon Jun 22 21:38:50 CST 2026
+base.1=/mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/intermediates/dex/debug/mergeProjectDexDebug/9/classes.dex
+path.1=9/classes.dex
+base.0=/mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/intermediates/dex/debug/mergeProjectDexDebug/0/classes.dex
+renamed.1=classes2.dex
+renamed.0=classes.dex
+path.0=0/classes.dex

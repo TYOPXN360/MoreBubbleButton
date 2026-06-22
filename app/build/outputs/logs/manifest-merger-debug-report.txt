@@ -1,0 +1,29 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:2:1-4:12
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:2:1-4:12
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:2:1-4:12
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:2:1-4:12
+	package
+		INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:2:11-69
+application
+ADDED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:3:5-55
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:3:5-55
+	android:extractNativeLibs
+		INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+	android:label
+		ADDED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:3:18-52
+uses-sdk
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml

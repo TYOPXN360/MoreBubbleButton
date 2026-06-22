@@ -1,0 +1,18 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.floatwindow.bubblemodule"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="26"
+9        android:targetSdkVersion="36" />
+10
+11    <application
+11-->/mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:3:5-55
+12        android:debuggable="true"
+13        android:extractNativeLibs="false"
+14        android:label="BubbleButtonModule" />
+14-->/mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/AndroidManifest.xml:3:18-52
+15
+16</manifest>

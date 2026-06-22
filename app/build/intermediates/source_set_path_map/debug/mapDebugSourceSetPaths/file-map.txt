@@ -1,0 +1,7 @@
+com.floatwindow.bubblemodule.app-pngs-0 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/generated/res/pngs/debug
+com.floatwindow.bubblemodule.app-resValues-1 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/generated/res/resValues/debug
+com.floatwindow.bubblemodule.app-packageDebugResources-2 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+com.floatwindow.bubblemodule.app-packageDebugResources-3 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+com.floatwindow.bubblemodule.app-debug-4 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/build/intermediates/merged_res/debug/mergeDebugResources
+com.floatwindow.bubblemodule.app-debug-5 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/debug/res
+com.floatwindow.bubblemodule.app-main-6 /mnt/TY/android/android-project/floatwindow/source/BubbleButtonModule/app/src/main/res
