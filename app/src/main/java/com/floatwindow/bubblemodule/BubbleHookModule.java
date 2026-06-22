@@ -141,12 +141,14 @@ public class BubbleHookModule extends XposedModule {
 
     /**
      * 控制气泡按钮可见性 — 只在 overview 状态下显示
+     * 注意：原按钮使用 alpha 动画（MultiValueAlpha），不是 setVisibility
+     * 所以这里只做日志记录，实际同步由 OnPreDrawListener 完成
      */
     private void updateBubbleVisibility(Object actionsView) {
         if (secondRow == null || bubbleButton == null) return;
 
         try {
-            // mHiddenFlags 在父类 OverviewActionsView 中，需要遍历类层次结构
+            // 遍历类层次结构找到 mHiddenFlags
             int hiddenFlags = -1;
             Class<?> clazz = actionsView.getClass();
             while (clazz != null) {
@@ -160,22 +162,18 @@ public class BubbleHookModule extends XposedModule {
                 }
             }
 
-            if (hiddenFlags == -1) {
-                log(Log.WARN, TAG, "mHiddenFlags not found in class hierarchy");
-                return;
-            }
+            if (hiddenFlags == -1) return;
 
-            // hiddenFlags == 0 表示在 overview 状态（操作栏可见）
             boolean shouldShow = (hiddenFlags == 0);
-            int visibility = shouldShow ? View.VISIBLE : View.INVISIBLE;
-
             log(Log.INFO, TAG, "updateBubbleVisibility: hiddenFlags=" + hiddenFlags
-                    + " shouldShow=" + shouldShow);
-
-            secondRow.setVisibility(visibility);
-            bubbleButton.setVisibility(visibility);
+                    + " shouldShow=" + shouldShow
+                    + " actionAlpha=" + ((View) actionsView).findViewById(
+                            ((View) actionsView).getContext().getResources()
+                                    .getIdentifier("action_buttons", "id",
+                                            ((View) actionsView).getContext().getPackageName()))
+                            .getAlpha());
         } catch (Throwable t) {
-            log(Log.WARN, TAG, "updateBubbleVisibility error: " + t.getMessage());
+            // ignore
         }
     }
 
@@ -412,7 +410,7 @@ public class BubbleHookModule extends XposedModule {
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
         secondRow = newSecondRow;
 
-        // 用 post 确保布局完成后设置正确的 topMargin
+        // 用 post 确保布局完成后设置正确的 topMargin + 同步动画
         newSecondRow.post(() -> {
             if (actionButtonsView != null) {
                 // 计算 action_buttons 底部相对于 parent 的位置
@@ -429,9 +427,22 @@ public class BubbleHookModule extends XposedModule {
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
                 lp.topMargin = relativeBottom + extraSpacing;
                 newSecondRow.setLayoutParams(lp);
-                log(Log.INFO, TAG, "Second row topMargin=" + (relativeBottom + extraSpacing)
-                        + " (bottom=" + relativeBottom + " + spacing=" + extraSpacing + ")");
+                log(Log.INFO, TAG, "Second row topMargin=" + (relativeBottom + extraSpacing));
             }
+
+            // 关键：同步动画 — 在每帧绘制前将 action_buttons 的 alpha 复制到 secondRow
+            actionsParent.getViewTreeObserver().addOnPreDrawListener(
+                    new android.view.ViewTreeObserver.OnPreDrawListener() {
+                        @Override
+                        public boolean onPreDraw() {
+                            float actionAlpha = actionButtonsView.getAlpha();
+                            if (secondRow != null && secondRow.getAlpha() != actionAlpha) {
+                                secondRow.setAlpha(actionAlpha);
+                            }
+                            return true;
+                        }
+                    });
+            log(Log.INFO, TAG, "Added alpha sync listener");
         });
     }
 
