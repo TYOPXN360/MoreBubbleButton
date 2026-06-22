@@ -334,21 +334,20 @@ public class BubbleHookModule extends XposedModule {
             Object taskContainer = getTaskContainer != null ? getTaskContainer.invoke(menuView) : null;
             if (taskContainer == null) { log(Log.WARN, TAG, "taskContainer is null"); return; }
 
-            // 使用与原菜单完全相同的布局和背景
+            // inflate 菜单项布局 — 与原菜单完全一致
             int layoutId = res.getIdentifier("task_view_menu_option", "layout", pkg);
             if (layoutId == 0) { log(Log.WARN, TAG, "layout not found"); return; }
 
-            // inflate 时传入 parent 让 LayoutParams 正确匹配
             ViewGroup menuItem = (ViewGroup) android.view.LayoutInflater.from(ctx)
                     .inflate(layoutId, optionLayout, false);
 
-            // 使用与原菜单相同的背景（带 hover/pressed 高亮效果）
+            // 设置背景 — 与原菜单一致（带 hover/pressed 高亮）
             int bgId = res.getIdentifier("app_chip_menu_item_bg", "drawable", pkg);
             if (bgId != 0) {
                 menuItem.setBackground(res.getDrawable(bgId, ctx.getTheme()));
             }
 
-            // 设置图标 — icon 是 View，用 setBackground 设置可绘制图标
+            // 设置图标 — icon 是 View，用 setBackground
             int iconId = res.getIdentifier("icon", "id", pkg);
             View iconView = iconId != 0 ? menuItem.findViewById(iconId) : null;
             if (iconView != null) {
@@ -356,7 +355,8 @@ public class BubbleHookModule extends XposedModule {
                 if (bubbleIconId == 0) bubbleIconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
                 if (bubbleIconId != 0) {
                     android.graphics.drawable.Drawable icon = res.getDrawable(bubbleIconId, ctx.getTheme());
-                    icon.setTint(res.getColor(res.getIdentifier("materialColorOnSurface", "color", pkg), ctx.getTheme()));
+                    int tintColorId = res.getIdentifier("materialColorOnSurface", "color", pkg);
+                    if (tintColorId != 0) icon.setTint(res.getColor(tintColorId, ctx.getTheme()));
                     iconView.setBackground(icon);
                 }
             }
@@ -368,7 +368,37 @@ public class BubbleHookModule extends XposedModule {
                 ((android.widget.TextView) textView).setText("消息气泡");
             }
 
-            // 点击事件 — 仅触发气泡，不退出多任务界面
+            // 关键：调用 setLayoutParamsForTaskMenuOptionItem 设置正确的布局参数
+            try {
+                java.lang.reflect.Method getTaskView = findMethod(menuView.getClass(), "getTaskView");
+                Object taskView = getTaskView != null ? getTaskView.invoke(menuView) : null;
+                if (taskView != null) {
+                    java.lang.reflect.Method getPagedOrientationHandler = findMethod(taskView.getClass(), "getPagedOrientationHandler");
+                    Object handler = getPagedOrientationHandler != null ? getPagedOrientationHandler.invoke(taskView) : null;
+                    if (handler != null) {
+                        Class<?> dpClass = mLauncherClassLoader.loadClass("com.android.launcher3.DeviceProfile");
+                        java.lang.reflect.Method setLayoutParams = findMethod(handler.getClass(),
+                                "setLayoutParamsForTaskMenuOptionItem",
+                                LinearLayout.LayoutParams.class, View.class, dpClass);
+                        if (setLayoutParams != null) {
+                            java.lang.reflect.Method getContainer = findMethod(menuView.getClass(), "getRecentsViewContainer");
+                            Object container = getContainer != null ? getContainer.invoke(menuView) : null;
+                            Object dp = null;
+                            if (container != null) {
+                                java.lang.reflect.Method getDp = findMethod(container.getClass(), "getDeviceProfile");
+                                dp = getDp != null ? getDp.invoke(container) : null;
+                            }
+                            if (dp != null) {
+                                setLayoutParams.invoke(handler, menuItem.getLayoutParams(), menuItem, dp);
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "setLayoutParams failed: " + t.getMessage());
+            }
+
+            // 点击事件 — 触发气泡 + 关闭菜单
             menuItem.setOnClickListener(v -> {
                 log(Log.INFO, TAG, "Bubble menu option clicked!");
                 try {
@@ -378,6 +408,20 @@ public class BubbleHookModule extends XposedModule {
                     Intent taskIntent = (Intent) getField(taskKey, "baseIntent");
                     int userId = getField(taskKey, "userId") != null ? (int) getField(taskKey, "userId") : 0;
                     if (taskIntent != null) {
+                        // 先关闭菜单
+                        try {
+                            java.lang.reflect.Method closeMethod = findMethod(
+                                    menuView.getClass(), "close", boolean.class);
+                            if (closeMethod != null) {
+                                closeMethod.invoke(menuView, true);
+                                log(Log.INFO, TAG, "Menu closed via close(true)");
+                            } else {
+                                log(Log.WARN, TAG, "close method not found");
+                            }
+                        } catch (Throwable t) {
+                            log(Log.WARN, TAG, "close failed: " + t.getMessage());
+                        }
+                        // 再触发气泡
                         bubbleCurrentTask(ctx, taskIntent, userId);
                     }
                 } catch (Throwable t) { log(Log.ERROR, TAG, "Bubble menu click failed: " + t.getMessage()); }
@@ -556,10 +600,12 @@ public class BubbleHookModule extends XposedModule {
      * 退出多任务界面 — 直接调用 RecentsView.finishRecentsAnimation
      */
     private void dismissOverview(Context ctx) {
-        // 菜单 context 不是 Activity，直接用 HOME 键最可靠
         try {
-            Runtime.getRuntime().exec(new String[]{"input", "keyevent", "KEYCODE_HOME"});
-            log(Log.INFO, TAG, "dismissed via HOME keyevent");
+            // 用 am start HOME 比 input keyevent 更可靠
+            Runtime.getRuntime().exec(new String[]{
+                    "am", "start", "-a", "android.intent.action.MAIN",
+                    "-c", "android.intent.category.HOME"});
+            log(Log.INFO, TAG, "dismissed via am start HOME");
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
         }
