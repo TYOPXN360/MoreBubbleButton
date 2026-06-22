@@ -1,0 +1,17 @@
+# Build outputs
+build/
+app/build/
+*.apk
+
+# Gradle
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+local.properties
+
+# OS
+.DS_Store
+Thumbs.db
