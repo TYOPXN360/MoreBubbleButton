@@ -158,9 +158,21 @@ public class BubbleHookModule extends XposedModule {
             btn.setPadding(sibling.getPaddingLeft(), sibling.getPaddingTop(),
                     sibling.getPaddingRight(), sibling.getPaddingBottom());
 
-            // 图标
-            int iconId = getResId(res, "ic_bubble_bar", "drawable", "com.google.android.apps.nexuslauncher");
-            if (iconId == 0) iconId = getResId(res, "bubble_view", "drawable", "com.google.android.apps.nexuslauncher");
+            // 图标 — 按优先级尝试多个资源名
+            int iconId = 0;
+            String[] iconNames = {
+                "ic_bubble_button",       // 气泡按钮图标 (最佳)
+                "ic_bubble_bar",          // 气泡栏图标
+                "bubble_ic_overflow_button", // 气泡溢出按钮
+                "bubble_view",            // 气泡视图
+            };
+            for (String name : iconNames) {
+                iconId = getResId(res, name, "drawable", "com.google.android.apps.nexuslauncher");
+                if (iconId != 0) {
+                    log(Log.INFO, TAG, "Using icon resource: " + name);
+                    break;
+                }
+            }
             if (iconId != 0) {
                 Drawable icon = res.getDrawable(iconId, null);
                 if (icon != null) {
@@ -168,6 +180,8 @@ public class BubbleHookModule extends XposedModule {
                     btn.setCompoundDrawables(icon, null, null, null);
                     btn.setCompoundDrawablePadding(8);
                 }
+            } else {
+                log(Log.WARN, TAG, "No bubble icon found, using text only");
             }
 
             log(Log.INFO, TAG, "Styled from screenshot sibling");
