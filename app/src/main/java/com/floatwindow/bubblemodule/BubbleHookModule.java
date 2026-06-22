@@ -270,22 +270,27 @@ public class BubbleHookModule extends XposedModule {
     }
 
     /**
-     * 创建气泡按钮
+     * 创建气泡按钮 — 使用 Launcher 的完整主题样式
      */
     @SuppressLint("DiscouragedApi")
     private Button createBubbleButton(Context ctx, android.content.res.Resources res, String pkg) {
-        int themeId = res.getIdentifier(
-                "ThemeControlHighlightWorkspaceColor", "style", pkg);
-        int styleId = res.getIdentifier(
-                "OverviewActionButton", "style", pkg);
+        // 关键：使用 OverviewActionButton 样式（含圆角背景、文字颜色、padding）
+        int overviewBtnStyleId = res.getIdentifier("OverviewActionButton", "style", pkg);
+        int overviewBtnBlurStyleId = res.getIdentifier("OverviewActionButton.Blur", "style", pkg);
 
-        android.view.ContextThemeWrapper ctxTheme =
-                new android.view.ContextThemeWrapper(ctx,
-                        themeId != 0 ? themeId : android.R.style.Theme_DeviceDefault);
+        // 优先使用 Blur 样式（毛玻璃效果），fallback 到普通样式
+        int useStyleId = overviewBtnBlurStyleId != 0 ? overviewBtnBlurStyleId : overviewBtnStyleId;
 
-        Button btn = (styleId != 0)
-                ? new Button(ctxTheme, null, 0, styleId)
-                : new Button(ctxTheme);
+        log(Log.INFO, TAG, "Using button style: " + useStyleId
+                + " (blur=" + overviewBtnBlurStyleId + " normal=" + overviewBtnStyleId + ")");
+
+        Button btn;
+        if (useStyleId != 0) {
+            // 直接用 Launcher 的 context（已含 overviewActionsContainerStyle 主题）
+            btn = new Button(ctx, null, 0, useStyleId);
+        } else {
+            btn = new Button(ctx);
+        }
 
         btn.setText("消息气泡");
         btn.setContentDescription("消息气泡");
@@ -301,14 +306,6 @@ public class BubbleHookModule extends XposedModule {
             if (icon != null) {
                 btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
             }
-        }
-
-        // 复制 background
-        for (int i = 0; i < 10; i++) {
-            View sibling = ((View) btn.getParent() != null)
-                    ? null // 还没加入 parent
-                    : null;
-            break;
         }
 
         // 点击
@@ -415,7 +412,27 @@ public class BubbleHookModule extends XposedModule {
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
         secondRow = newSecondRow;
 
-        log(Log.INFO, TAG, "Created second row at index=" + insertIndex);
+        // 用 post 确保布局完成后设置正确的 topMargin
+        newSecondRow.post(() -> {
+            if (actionButtonsView != null) {
+                // 计算 action_buttons 底部相对于 parent 的位置
+                int[] loc = new int[2];
+                actionButtonsView.getLocationOnScreen(loc);
+                int[] parentLoc = new int[2];
+                actionsParent.getLocationOnScreen(parentLoc);
+                int relativeBottom = loc[1] - parentLoc[1] + actionButtonsView.getHeight();
+
+                // 加上额外间距（overview_actions_top_margin = 24dp）
+                int topMarginId = res.getIdentifier("overview_actions_top_margin", "dimen", pkg);
+                int extraSpacing = topMarginId != 0 ? res.getDimensionPixelSize(topMarginId) : 24;
+
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
+                lp.topMargin = relativeBottom + extraSpacing;
+                newSecondRow.setLayoutParams(lp);
+                log(Log.INFO, TAG, "Second row topMargin=" + (relativeBottom + extraSpacing)
+                        + " (bottom=" + relativeBottom + " + spacing=" + extraSpacing + ")");
+            }
+        });
     }
 
     /**
