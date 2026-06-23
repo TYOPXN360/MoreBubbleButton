@@ -75,18 +75,14 @@ public class SettingsDialog {
 
         // 5. 恢复默认按钮
         TextView resetBtn = new TextView(ctx);
-        resetBtn.setText("恢复默认设置");
+        resetBtn.setText("重置位置");
         resetBtn.setTextSize(14);
         resetBtn.setTextColor(0xAAFFFFFF);
         resetBtn.setPadding(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 10));
         resetBtn.setGravity(Gravity.CENTER);
         resetBtn.setOnClickListener(v -> {
-            ModuleSettings.setMenuEnabled(ctx, true);
-            ModuleSettings.setActionBarEnabled(ctx, true);
-            ModuleSettings.setPositionMode(ctx, 0);
             ModuleSettings.setPosX(ctx, 50);
             ModuleSettings.setPosY(ctx, 50);
-            // 关闭并重新打开对话框刷新状态
             try { ((android.app.AlertDialog) ((View) v.getParent()).getParent().getParent()).dismiss(); } catch (Throwable ignored) {}
             show(ctx, onDismiss);
         });
