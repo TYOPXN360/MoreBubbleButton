@@ -376,10 +376,6 @@ public class MoreBubbleHookModule extends XposedModule {
         View abv = actionsParent.findViewById(abId);
         if (abv != null) insertIndex = actionsParent.indexOfChild(abv) + 1;
 
-        // posY: 0-49=上方（0=紧贴上方） 50=默认位置 51-100=下方（100=紧贴下方）
-        // 计算偏移：默认间距为 spacing，posY 越大越往下
-        int defaultSpacing = 24;
-
         FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
@@ -390,23 +386,34 @@ public class MoreBubbleHookModule extends XposedModule {
                 int[] loc = new int[2], pLoc = new int[2];
                 abv.getLocationOnScreen(loc);
                 actionsParent.getLocationOnScreen(pLoc);
+
                 int abTop = loc[1] - pLoc[1];
-                int abBottom = abTop + abv.getHeight();
                 int btnH = newSecondRow.getHeight();
                 int parentH = actionsParent.getHeight();
 
-                // posY 0~100 映射到 parent 内的像素位置
-                // 0=parent 顶部, 100=parent 底部
-                float ratio = posY / 100f;
-                float targetY = ratio * (parentH - btnH);
-                // 限制不超出 parent
-                targetY = Math.max(0, Math.min(targetY, parentH - btnH));
+                // 获取设备参数
+                android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
+                float density = dm.density;
+
+                // 默认间距 = overview_actions_top_margin（约 24dp）
+                int topId = res.getIdentifier("overview_actions_top_margin", "dimen", pkg);
+                int defaultSpacing = topId != 0 ? res.getDimensionPixelSize(topId) : (int)(24 * density);
+
+                // posY 0~100 映射：
+                // 0%   = action_buttons 上方间距处
+                // 50%  = action_buttons 正下方（默认间距）
+                // 100% = parent 底部
+                float yMin = Math.max(0, abTop - btnH - defaultSpacing);
+                float yMax = Math.max(0, parentH - btnH);
+                float targetY = yMin + (posY / 100f) * (yMax - yMin);
+                targetY = Math.max(0, Math.min(targetY, yMax));
 
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
                 lp.topMargin = (int) targetY;
                 newSecondRow.setLayoutParams(lp);
-                log(Log.INFO, TAG, "Second row Y=" + posY + " topMargin=" + (int) targetY
-                        + " parentH=" + parentH + " btnH=" + btnH);
+                log(Log.INFO, TAG, "Y=" + posY + " margin=" + (int) targetY
+                        + " range=[" + (int) yMin + "," + (int) yMax + "]"
+                        + " parentH=" + parentH + " density=" + density);
             }
             actionsParent.getViewTreeObserver().addOnPreDrawListener(
                     new ViewTreeObserver.OnPreDrawListener() {
