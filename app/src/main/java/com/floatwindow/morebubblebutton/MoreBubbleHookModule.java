@@ -378,9 +378,14 @@ public class MoreBubbleHookModule extends XposedModule {
 
         // Y 偏移：posY 0% = 紧贴底部（与 action_buttons 齐平），100% = 向上偏移 48dp
         float density = ctx.getResources().getDisplayMetrics().density;
-        int maxOffset = (int)(48 * density); // 最大偏移量 = action_buttons 高度
+        int maxOffset = (int)(48 * density);
         int bottomOffset = (int)((posY / 100f) * maxOffset);
         rowLp.bottomMargin = bottomOffset;
+
+        // X 偏移补偿：图标在左侧导致视觉偏右，居中时向左偏移 12dp
+        if (hGravity == android.view.Gravity.CENTER_HORIZONTAL) {
+            rowLp.setMarginStart(-(int)(12 * density));
+        }
 
         int insertIndex = 0;
         int abId = res.getIdentifier("action_buttons", "id", pkg);

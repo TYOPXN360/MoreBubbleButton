@@ -37,9 +37,9 @@ public class ModuleSettings {
         getPrefs(ctx).edit().putInt(KEY_POSITION_MODE, v).apply();
     }
 
-    /** X 轴位置 0-100，42=居中偏左（补偿图标偏移） */
+    /** X 轴位置 0-100，50=居中（已含图标偏移补偿） */
     public static int getPosX(Context ctx) {
-        return getPrefs(ctx).getInt(KEY_POS_X, 42);
+        return getPrefs(ctx).getInt(KEY_POS_X, 50);
     }
     public static void setPosX(Context ctx, int v) {
         getPrefs(ctx).edit().putInt(KEY_POS_X, v).apply();
