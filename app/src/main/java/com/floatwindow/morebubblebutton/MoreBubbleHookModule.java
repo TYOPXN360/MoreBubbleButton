@@ -273,8 +273,11 @@ public class MoreBubbleHookModule extends XposedModule {
     private Object createPreference(Context ctx, Class<?> prefClass, String key,
             String title, String summary, int order) {
         try {
-            java.lang.reflect.Constructor<?> ctor = prefClass.getConstructor(Context.class);
-            Object pref = ctor.newInstance(ctx);
+            // Preference(Context, AttributeSet, int, int) — 使用 null 和默认值
+            java.lang.reflect.Constructor<?> ctor = prefClass.getDeclaredConstructor(
+                    Context.class, android.util.AttributeSet.class, int.class, int.class);
+            ctor.setAccessible(true);
+            Object pref = ctor.newInstance(ctx, null, 0, 0);
             // 设置 key
             Method setKey = findMethod(prefClass, "setKey", String.class);
             setKey.invoke(pref, key);
@@ -301,8 +304,10 @@ public class MoreBubbleHookModule extends XposedModule {
     private Object createSwitchPreference(Context ctx, Class<?> switchPrefClass,
             String key, String title, String summary, boolean defaultValue) {
         try {
-            java.lang.reflect.Constructor<?> ctor = switchPrefClass.getConstructor(Context.class);
-            Object pref = ctor.newInstance(ctx);
+            java.lang.reflect.Constructor<?> ctor = switchPrefClass.getDeclaredConstructor(
+                    Context.class, android.util.AttributeSet.class, int.class, int.class);
+            ctor.setAccessible(true);
+            Object pref = ctor.newInstance(ctx, null, 0, 0);
             Method setKey = findMethod(switchPrefClass, "setKey", String.class);
             setKey.invoke(pref, key);
             Method setTitle = findMethod(switchPrefClass, "setTitle", CharSequence.class);

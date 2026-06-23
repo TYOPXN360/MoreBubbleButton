@@ -13,7 +13,9 @@ public class ModuleSettings {
     private static final String KEY_BOTTOM_POSITION = "bottom_position"; // 0=左 1=中 2=右
 
     private static SharedPreferences getPrefs(Context ctx) {
-        return ctx.getSharedPreferences(PREFS_NAME, Context.MODE_WORLD_READABLE);
+        // 使用应用私有目录，避免 MODE_WORLD_READABLE 问题
+        Context appCtx = ctx.getApplicationContext();
+        return appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 
     public static boolean isMenuEnabled(Context ctx) {
