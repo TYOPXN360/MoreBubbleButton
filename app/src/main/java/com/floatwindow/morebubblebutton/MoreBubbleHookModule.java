@@ -193,18 +193,8 @@ public class MoreBubbleHookModule extends XposedModule {
         Button btn = createBubbleButton(ctx, res, pkg);
         ViewGroup actionsParent = (ViewGroup) actionsView;
 
-        if (visibleButtonCount >= 3) {
-            ensureSecondRow(actionsParent, btn, res, pkg);
-        } else {
-            btn.setTag("bubble_button");
-            ViewGroup.MarginLayoutParams mlp = new ViewGroup.MarginLayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int spacingId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
-            if (spacingId != 0) mlp.setMarginStart(res.getDimensionPixelSize(spacingId));
-            btn.setLayoutParams(mlp);
-            mActionButtons.addView(btn);
-            bubbleButton = btn;
-        }
+        // 始终将消息气泡按钮放到第二行，避免与原按钮重叠
+        ensureSecondRow(actionsParent, btn, res, pkg);
     }
 
     private boolean isClearAllButton(View child) {
