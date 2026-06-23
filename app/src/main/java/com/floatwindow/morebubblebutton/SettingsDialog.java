@@ -83,7 +83,25 @@ public class SettingsDialog {
         sliderContainer.addView(seekBar);
         layout.addView(sliderContainer);
 
-        // 重启启动器按钮
+        // 5. 恢复默认按钮
+        TextView resetBtn = new TextView(ctx);
+        resetBtn.setText("恢复默认设置");
+        resetBtn.setTextSize(14);
+        resetBtn.setTextColor(0xAAFFFFFF);
+        resetBtn.setPadding(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 10));
+        resetBtn.setGravity(Gravity.CENTER);
+        resetBtn.setOnClickListener(v -> {
+            ModuleSettings.setMenuEnabled(ctx, true);
+            ModuleSettings.setActionBarEnabled(ctx, true);
+            ModuleSettings.setPositionMode(ctx, 0);
+            ModuleSettings.setSecondRowGravity(ctx, 1);
+            // 关闭并重新打开对话框刷新状态
+            try { ((android.app.AlertDialog) ((View) v.getParent()).getParent().getParent()).dismiss(); } catch (Throwable ignored) {}
+            show(ctx, onDismiss);
+        });
+        layout.addView(resetBtn);
+
+        // 6. 重启启动器按钮
         TextView restartBtn = new TextView(ctx);
         restartBtn.setText("重启启动器");
         restartBtn.setTextSize(15);
