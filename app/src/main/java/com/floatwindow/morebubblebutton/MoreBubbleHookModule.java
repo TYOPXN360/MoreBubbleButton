@@ -29,12 +29,12 @@ public class MoreBubbleHookModule extends XposedModule {
     private static final String TAG = "MoreBubbleModule";
     private Object recentsViewInstance;
     private View bubbleButton;
-    private View secondRow;
+    private static View sSecondRow; // 静态引用，供 SettingsDialog 回调使用
     private ClassLoader mLauncherClassLoader;
 
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
-        log(Log.INFO, TAG, "MoreBubbleModule: " + param.getProcessName() + " | API " + getApiVersion());
+        Log.i(TAG, "MoreBubbleModule: " + param.getProcessName() + " | API " + getApiVersion());
     }
 
     @Override
@@ -58,10 +58,10 @@ public class MoreBubbleHookModule extends XposedModule {
                     Context ctx = ((View) chain.getThisObject()).getContext();
                     if (ModuleSettings.isActionBarEnabled(ctx))
                         injectBubbleButton(chain.getThisObject(), cl);
-                } catch (Throwable t) { log(Log.ERROR, TAG, "inject failed", t); }
+                } catch (Throwable t) { Log.e(TAG, "inject failed", t); }
                 return ret;
             });
-        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook onFinishInflate: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "Hook onFinishInflate: " + t.getMessage()); }
 
         // Hook OverviewActionsView.onClick
         try {
@@ -74,7 +74,7 @@ public class MoreBubbleHookModule extends XposedModule {
                 }
                 return chain.proceed();
             });
-        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook onClick: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "Hook onClick: " + t.getMessage()); }
 
         // Hook TaskMenuView.addMenuOptions
         try {
@@ -85,10 +85,10 @@ public class MoreBubbleHookModule extends XposedModule {
                     Context ctx = ((View) chain.getThisObject()).getContext();
                     if (ModuleSettings.isMenuEnabled(ctx))
                         addBubbleMenuOption(chain.getThisObject(), cl);
-                } catch (Throwable t) { log(Log.ERROR, TAG, "addBubbleMenuOption: " + t.getMessage()); }
+                } catch (Throwable t) { Log.e(TAG, "addBubbleMenuOption: " + t.getMessage()); }
                 return null;
             });
-        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook addMenuOptions: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "Hook addMenuOptions: " + t.getMessage()); }
 
         // Hook LauncherSettingsFragment.onCreatePreferences — 注入设置
         try {
@@ -96,10 +96,10 @@ public class MoreBubbleHookModule extends XposedModule {
                     .getMethod("onCreatePreferences", Bundle.class, String.class)).intercept(chain -> {
                 chain.proceed();
                 try { injectSettingsPreferences(chain.getThisObject(), cl); }
-                catch (Throwable t) { log(Log.ERROR, TAG, "injectSettings: " + t.getMessage()); }
+                catch (Throwable t) { Log.e(TAG, "injectSettings: " + t.getMessage()); }
                 return null;
             });
-        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook SettingsActivity: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "Hook SettingsActivity: " + t.getMessage()); }
     }
 
     // ==================== 设置注入（参考 PLEnhanced LauncherSettings.kt） ====================
@@ -154,8 +154,8 @@ public class MoreBubbleHookModule extends XposedModule {
             }
 
             addPref(screen, pref, cl);
-            log(Log.INFO, TAG, "Settings entry injected");
-        } catch (Throwable t) { log(Log.ERROR, TAG, "injectSettings: " + t.getMessage()); }
+            Log.i(TAG, "Settings entry injected");
+        } catch (Throwable t) { Log.e(TAG, "injectSettings: " + t.getMessage()); }
     }
 
     private Object newPref(Class<?> cls, Context ctx, String key, String title, String summary) {
@@ -166,7 +166,7 @@ public class MoreBubbleHookModule extends XposedModule {
             callM(p, "setTitle", title);
             if (summary != null) callM(p, "setSummary", summary);
             return p;
-        } catch (Throwable t) { log(Log.WARN, TAG, "newPref: " + t.getMessage()); return null; }
+        } catch (Throwable t) { Log.w(TAG, "newPref: " + t.getMessage()); return null; }
     }
 
     private Object newSwitch(ClassLoader cl, Context ctx, String key, String title, String summary, boolean def) {
@@ -183,7 +183,7 @@ public class MoreBubbleHookModule extends XposedModule {
             // 设置默认值
             try { prefCls.getMethod("setDefaultValue", Object.class).invoke(p, def); } catch (Throwable ignored) {}
             return p;
-        } catch (Throwable t) { log(Log.WARN, TAG, "newSwitch: " + t.getMessage()); return null; }
+        } catch (Throwable t) { Log.w(TAG, "newSwitch: " + t.getMessage()); return null; }
     }
 
     private void setKey(Object p, String key, Class<?> cls) {
@@ -201,7 +201,7 @@ public class MoreBubbleHookModule extends XposedModule {
         try { cl.loadClass("androidx.preference.PreferenceScreen")
                 .getMethod("addPreference", cl.loadClass("androidx.preference.Preference"))
                 .invoke(screen, pref); }
-        catch (Throwable t) { log(Log.WARN, TAG, "addPref: " + t.getMessage()); }
+        catch (Throwable t) { Log.w(TAG, "addPref: " + t.getMessage()); }
     }
 
     private String getPosText(Context ctx) {
@@ -232,17 +232,69 @@ public class MoreBubbleHookModule extends XposedModule {
     }
 
     /**
+     * 更新第二行位置 — 读取当前设置并应用到 LayoutParams
+     */
+    private void updateSecondRowPosition(Context ctx, FrameLayout.LayoutParams lp) {
+        int posX = ModuleSettings.getPosX(ctx);
+        int posY = ModuleSettings.getPosY(ctx);
+        float density = ctx.getResources().getDisplayMetrics().density;
+
+        // Y 偏移
+        int maxOffset = (int)(48 * density);
+        lp.bottomMargin = (int)((posY / 100f) * maxOffset);
+
+        // X margin — 需要等 View 宽度可用
+        if (sSecondRow != null && sSecondRow.getWidth() > 0) {
+            applyXMargin(ctx, lp);
+        } else if (sSecondRow != null) {
+            sSecondRow.post(() -> {
+                if (sSecondRow != null && sSecondRow.getWidth() > 0) {
+                    FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) sSecondRow.getLayoutParams();
+                    applyXMargin(ctx, p);
+                    sSecondRow.setLayoutParams(p);
+                }
+            });
+        }
+
+        if (sSecondRow != null) {
+            sSecondRow.setLayoutParams(lp);
+            Log.i(TAG, "Position updated: X=" + posX + " Y=" + posY);
+        }
+    }
+
+    private static void applyXMargin(Context ctx, FrameLayout.LayoutParams lp) {
+        int posX = ModuleSettings.getPosX(ctx);
+        float density = ctx.getResources().getDisplayMetrics().density;
+        ViewGroup parent = (ViewGroup) sSecondRow.getParent();
+        if (parent == null) return;
+        int parentWidth = parent.getWidth();
+        int btnWidth = sSecondRow.getWidth();
+        if (btnWidth <= 0 || parentWidth <= 0) return;
+
+        float maxMargin = parentWidth - btnWidth;
+        int marginStart = (int)((posX / 100f) * maxMargin);
+        // 50% 附近精确居中 + 图标补偿
+        if (posX >= 48 && posX <= 52) {
+            float centerMargin = (maxMargin / 2f) - 13 * density;
+            marginStart = (int) centerMargin;
+        }
+        lp.setMarginStart((int) Math.max(0, Math.min(marginStart, maxMargin)));
+        Log.i(TAG, "applyXMargin: posX=" + posX + " marginStart=" + marginStart
+                + " maxMargin=" + maxMargin + " parentW=" + parentWidth + " btnW=" + btnWidth);
+    }
+
+    /**
      * 模式0：跟随原按钮 — 直接加到 action_buttons 末尾
      */
     private void addToActionButtons(ViewGroup actionsParent, Button btn,
             android.content.res.Resources res, String pkg) {
         // 如果之前在第二行，先移除
-        if (secondRow != null) {
-            if (bubbleButton != null) ((ViewGroup) secondRow).removeView(bubbleButton);
-            if (((ViewGroup) secondRow).getChildCount() == 0) {
-                actionsParent.removeView(secondRow);
+        if (sSecondRow != null) {
+            if (bubbleButton != null) ((ViewGroup) sSecondRow).removeView(bubbleButton);
+            if (((ViewGroup) sSecondRow).getChildCount() == 0) {
+                actionsParent.removeView(sSecondRow);
             }
-            secondRow = null;
+            sSecondRow = null;
         }
 
         int abId = res.getIdentifier("action_buttons", "id", pkg);
@@ -276,17 +328,17 @@ public class MoreBubbleHookModule extends XposedModule {
                 while (cur != null) {
                     if (rvCls.isInstance(cur)) {
                         recentsViewInstance = cur;
-                        log(Log.INFO, TAG, "Captured RecentsView in follow mode: " + cur);
+                        Log.i(TAG, "Captured RecentsView in follow mode: " + cur);
                         break;
                     }
                     cur = (cur.getParent() instanceof View) ? (View) cur.getParent() : null;
                 }
             } catch (Throwable t) {
-                log(Log.WARN, TAG, "Capture RecentsView failed: " + t.getMessage());
+                Log.w(TAG, "Capture RecentsView failed: " + t.getMessage());
             }
         }
 
-        log(Log.INFO, TAG, "Bubble button added to action_buttons (follow mode)");
+        Log.i(TAG, "Bubble button added to action_buttons (follow mode)");
     }
 
     private boolean isClearAllButton(View child) {
@@ -314,11 +366,23 @@ public class MoreBubbleHookModule extends XposedModule {
 
         btn.setOnClickListener(v -> onBubbleButtonClick((View) btn.getParent().getParent()));
         btn.setOnLongClickListener(v -> {
+            Log.i(TAG, "Long click - opening settings");
             SettingsDialog.show(v.getContext(), () -> {
-                if (!ModuleSettings.isActionBarEnabled(v.getContext()) && secondRow != null)
-                    secondRow.setVisibility(View.GONE);
-                else if (ModuleSettings.isActionBarEnabled(v.getContext()) && secondRow != null)
-                    secondRow.setVisibility(View.VISIBLE);
+                Log.i(TAG, "Settings dialog dismissed, updating position");
+                Context dialogCtx = v.getContext();
+                if (!ModuleSettings.isActionBarEnabled(dialogCtx) && sSecondRow != null) {
+                    sSecondRow.setVisibility(View.GONE);
+                } else if (ModuleSettings.isActionBarEnabled(dialogCtx) && sSecondRow != null) {
+                    sSecondRow.setVisibility(View.VISIBLE);
+                }
+                // 重新应用位置设置
+                if (sSecondRow != null && sSecondRow.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                    Log.i(TAG, "Updating position: X=" + ModuleSettings.getPosX(dialogCtx)
+                            + " Y=" + ModuleSettings.getPosY(dialogCtx));
+                    updateSecondRowPosition(dialogCtx, (FrameLayout.LayoutParams) sSecondRow.getLayoutParams());
+                } else {
+                    Log.w(TAG, "sSecondRow=" + sSecondRow + " or layout params wrong");
+                }
             });
             return true;
         });
@@ -330,11 +394,11 @@ public class MoreBubbleHookModule extends XposedModule {
             android.content.res.Resources res, String pkg) {
         Context ctx = actionsParent.getContext();
 
-        if (secondRow != null && secondRow.getParent() == actionsParent) {
-            for (int i = 0; i < ((ViewGroup) secondRow).getChildCount(); i++) {
-                if (((ViewGroup) secondRow).getChildAt(i).getTag() != null
-                        && "bubble_button".equals(((ViewGroup) secondRow).getChildAt(i).getTag().toString())) {
-                    bubbleButton = ((ViewGroup) secondRow).getChildAt(i);
+        if (sSecondRow != null && sSecondRow.getParent() == actionsParent) {
+            for (int i = 0; i < ((ViewGroup) sSecondRow).getChildCount(); i++) {
+                if (((ViewGroup) sSecondRow).getChildAt(i).getTag() != null
+                        && "bubble_button".equals(((ViewGroup) sSecondRow).getChildAt(i).getTag().toString())) {
+                    bubbleButton = ((ViewGroup) sSecondRow).getChildAt(i);
                     return;
                 }
             }
@@ -343,7 +407,7 @@ public class MoreBubbleHookModule extends XposedModule {
             int spId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
             if (spId != 0) mlp.setMarginStart(res.getDimensionPixelSize(spId));
             btn.setLayoutParams(mlp);
-            ((ViewGroup) secondRow).addView(btn);
+            ((ViewGroup) sSecondRow).addView(btn);
             bubbleButton = btn;
             return;
         }
@@ -368,34 +432,15 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.addView(btn);
         bubbleButton = btn;
 
-        // 定位：用 layout_gravity=center|bottom 垂直定位，margin 水平定位
+        // 定位：用 layout_gravity=START|BOTTOM + marginStart 实现所有位置
         FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        rowLp.gravity = android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.BOTTOM;
+        rowLp.gravity = android.view.Gravity.START | android.view.Gravity.BOTTOM;
 
         // Y 偏移：posY 0% = 紧贴底部，100% = 向上偏移 48dp
         int maxOffset = (int)(48 * density);
         int bottomOffset = (int)((posY / 100f) * maxOffset);
         rowLp.bottomMargin = bottomOffset;
-
-        // X 偏移：posX 0%=左对齐 50%=居中(含9dp补偿) 100%=右对齐
-        // 用 marginStart 实现连续定位
-        int parentWidth = actionsParent.getWidth();
-        int btnWidth = newSecondRow.getWidth();
-        if (btnWidth > 0 && parentWidth > 0) {
-            // 0% → marginStart=0（左对齐）
-            // 50% → marginStart = (parentWidth - btnWidth) / 2 - 9dp（居中偏左）
-            // 100% → marginStart = parentWidth - btnWidth（右对齐）
-            float halfScreen = (parentWidth - btnWidth) / 2f;
-            float centerMargin = halfScreen - 11 * density;
-            float maxMargin = parentWidth - btnWidth;
-            int marginStart = (int)((posX / 100f) * maxMargin);
-            // 50% 时强制居中偏左
-            if (posX >= 48 && posX <= 52) {
-                marginStart = (int) centerMargin;
-            }
-            rowLp.setMarginStart((int) Math.max(0, Math.min(marginStart, maxMargin)));
-        }
 
         int insertIndex = 0;
         int abId = res.getIdentifier("action_buttons", "id", pkg);
@@ -403,18 +448,38 @@ public class MoreBubbleHookModule extends XposedModule {
         if (abv != null) insertIndex = actionsParent.indexOfChild(abv) + 1;
 
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
-        secondRow = newSecondRow;
+        sSecondRow = newSecondRow;
 
-        // 同步 alpha 动画
+        // post 里应用 X margin + 同步 alpha
         newSecondRow.post(() -> {
+            // X margin — 用 layout listener 确保宽度已计算
+            if (sSecondRow != null) {
+                sSecondRow.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+                    @Override
+                    public void onLayoutChange(View v, int l, int t, int r, int b,
+                                               int ol, int ot, int ob, int or_) {
+                        sSecondRow.removeOnLayoutChangeListener(this);
+                        if (sSecondRow != null && sSecondRow.getWidth() > 0) {
+                            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) sSecondRow.getLayoutParams();
+                            applyXMargin(ctx, p);
+                            sSecondRow.setLayoutParams(p);
+                            Log.i(TAG, "X margin applied via layout listener");
+                        }
+                    }
+                });
+                // fallback: 直接尝试
+                applyXMargin(ctx, (FrameLayout.LayoutParams) sSecondRow.getLayoutParams());
+            }
+
+            // 同步 alpha 动画
             View abv2 = actionsParent.findViewById(
                     res.getIdentifier("action_buttons", "id", pkg));
             if (abv2 != null) {
                 actionsParent.getViewTreeObserver().addOnPreDrawListener(
                         new ViewTreeObserver.OnPreDrawListener() {
                             @Override public boolean onPreDraw() {
-                                if (secondRow != null && abv2 != null)
-                                    secondRow.setAlpha(abv2.getAlpha());
+                                if (sSecondRow != null && abv2 != null)
+                                    sSecondRow.setAlpha(abv2.getAlpha());
                                 return true;
                             }
                         });
@@ -442,7 +507,7 @@ public class MoreBubbleHookModule extends XposedModule {
                 Object tv = findMethod(menuView.getClass(), "getTaskView").invoke(menuView);
                 if (tv != null) {
                     recentsViewInstance = findMethod(tv.getClass(), "getRecentsView").invoke(tv);
-                    log(Log.INFO, TAG, "Captured RecentsView: " + recentsViewInstance);
+                    Log.i(TAG, "Captured RecentsView: " + recentsViewInstance);
                 }
             } catch (Throwable ignored) {}
 
@@ -483,11 +548,11 @@ public class MoreBubbleHookModule extends XposedModule {
                         bubbleCurrentTask(ctx, intent, userId);
                         new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> dismissOverview(ctx), 200);
                     }
-                } catch (Throwable t) { log(Log.ERROR, TAG, "menu click: " + t.getMessage()); }
+                } catch (Throwable t) { Log.e(TAG, "menu click: " + t.getMessage()); }
             });
 
             optionLayout.addView(menuItem);
-        } catch (Throwable t) { log(Log.ERROR, TAG, "addBubbleMenuOption: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "addBubbleMenuOption: " + t.getMessage()); }
     }
 
     // ==================== 气泡触发 ====================
@@ -496,7 +561,7 @@ public class MoreBubbleHookModule extends XposedModule {
         Context ctx = actionsView.getContext();
         Object rv = recentsViewInstance;
         if (rv == null) rv = findRecentsViewFromHierarchy(actionsView);
-        if (rv == null) { log(Log.WARN, TAG, "RecentsView not found"); return; }
+        if (rv == null) { Log.w(TAG, "RecentsView not found"); return; }
 
         try {
             Object tv = findMethod(rv.getClass(), "getCurrentPageTaskView").invoke(rv);
@@ -512,7 +577,7 @@ public class MoreBubbleHookModule extends XposedModule {
 
             bubbleCurrentTask(ctx, intent, userId);
             new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> dismissOverview(ctx), 200);
-        } catch (Throwable t) { log(Log.ERROR, TAG, "onBubbleButtonClick: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "onBubbleButtonClick: " + t.getMessage()); }
     }
 
     private boolean bubbleCurrentTask(Context ctx, Intent taskIntent, int userId) {
@@ -537,10 +602,10 @@ public class MoreBubbleHookModule extends XposedModule {
             for (Method m : proxy.getClass().getMethods())
                 if (m.getName().equals("showAppBubble")) {
                     m.invoke(proxy, bIntent, userHandle, ep, null);
-                    log(Log.INFO, TAG, "showAppBubble OK");
+                    Log.i(TAG, "showAppBubble OK");
                     return true;
                 }
-        } catch (Throwable t) { log(Log.ERROR, TAG, "bubbleCurrentTask: " + t.getMessage()); }
+        } catch (Throwable t) { Log.e(TAG, "bubbleCurrentTask: " + t.getMessage()); }
         return false;
     }
 
@@ -581,13 +646,13 @@ public class MoreBubbleHookModule extends XposedModule {
                 Object sm = findMethod(recentsViewInstance.getClass(), "getStateManager").invoke(recentsViewInstance);
                 if (sm != null) {
                     findMethod(sm.getClass(), "moveToRestState").invoke(sm);
-                    log(Log.INFO, TAG, "dismissed via moveToRestState");
+                    Log.i(TAG, "dismissed via moveToRestState");
                     return;
                 }
             }
             Runtime.getRuntime().exec(new String[]{"am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"});
-            log(Log.INFO, TAG, "dismissed via am start HOME");
-        } catch (Throwable t) { log(Log.ERROR, TAG, "dismiss: " + t.getMessage()); }
+            Log.i(TAG, "dismissed via am start HOME");
+        } catch (Throwable t) { Log.e(TAG, "dismiss: " + t.getMessage()); }
     }
 
     // ==================== 工具方法 ====================
@@ -614,5 +679,62 @@ public class MoreBubbleHookModule extends XposedModule {
     private static void showToast(Context ctx, String msg) {
         new android.os.Handler(Looper.getMainLooper()).post(() ->
                 Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show());
+    }
+
+    /**
+     * 静态方法：从 SettingsDialog 调用，重新应用位置设置
+     */
+    public static void applyPositionFromSettings(Context ctx) {
+        if (sSecondRow == null) {
+            Log.i(TAG, "applyPositionFromSettings: sSecondRow is null, settings saved for next load");
+            return;
+        }
+
+        try {
+            Log.i(TAG, "applyPositionFromSettings: X=" + ModuleSettings.getPosX(ctx)
+                    + " Y=" + ModuleSettings.getPosY(ctx));
+
+            if (sSecondRow.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) sSecondRow.getLayoutParams();
+                float density = ctx.getResources().getDisplayMetrics().density;
+
+                // Y 偏移
+                int posY = ModuleSettings.getPosY(ctx);
+                int maxOffset = (int)(48 * density);
+                lp.bottomMargin = (int)((posY / 100f) * maxOffset);
+
+                // X margin — 等布局完成后应用
+                if (sSecondRow.getWidth() > 0) {
+                    applyXMargin(ctx, lp);
+                } else {
+                    sSecondRow.post(() -> {
+                        if (sSecondRow != null && sSecondRow.getWidth() > 0) {
+                            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) sSecondRow.getLayoutParams();
+                            applyXMargin(ctx, p);
+                            sSecondRow.requestLayout();
+                            Log.i(TAG, "X margin applied via post");
+                        }
+                    });
+                }
+
+                sSecondRow.setLayoutParams(lp);
+                sSecondRow.requestLayout();
+                Log.i(TAG, "Position applied: X=" + ModuleSettings.getPosX(ctx) + " Y=" + posY);
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "applyPositionFromSettings failed: " + t.getMessage());
+        }
+    }
+
+    private static View findViewByTag(View view, String tag) {
+        if (tag.equals(view.getTag())) return view;
+        if (view instanceof ViewGroup) {
+            ViewGroup vg = (ViewGroup) view;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                View found = findViewByTag(vg.getChildAt(i), tag);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 }

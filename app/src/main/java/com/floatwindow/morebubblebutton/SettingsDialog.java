@@ -5,17 +5,21 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public class SettingsDialog {
 
     @SuppressLint("UseSwitchCompatOrMaterialCode")
     public static void show(Context ctx, Runnable onDismiss) {
+        Log.i("MoreBubbleModule", "SettingsDialog.show called, onDismiss=" + (onDismiss != null ? "non-null" : "null"));
+        Toast.makeText(ctx, "打开消息气泡设置", Toast.LENGTH_SHORT).show();
         LinearLayout layout = new LinearLayout(ctx);
         layout.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(ctx, 20);
@@ -138,8 +142,16 @@ public class SettingsDialog {
         new AlertDialog.Builder(ctx)
                 .setTitle("消息气泡设置")
                 .setView(layout)
-                .setPositiveButton("确定", (d, w) -> { if (onDismiss != null) onDismiss.run(); })
-                .setOnDismissListener(d -> { if (onDismiss != null) onDismiss.run(); })
+                .setPositiveButton("确定", (d, w) -> {
+                    Log.i("MoreBubbleModule", "Dialog positive button clicked");
+                    MoreBubbleHookModule.applyPositionFromSettings(ctx);
+                    if (onDismiss != null) onDismiss.run();
+                })
+                .setOnDismissListener(d -> {
+                    Log.i("MoreBubbleModule", "Dialog dismissed");
+                    MoreBubbleHookModule.applyPositionFromSettings(ctx);
+                    if (onDismiss != null) onDismiss.run();
+                })
                 .show();
     }
 
