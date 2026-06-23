@@ -351,10 +351,12 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.setTag("bubble_second_row");
         newSecondRow.setOrientation(LinearLayout.HORIZONTAL);
 
-        // 使用滑动条设置的 gravity
+        // 使用滑动条设置的 gravity（0-2=上左中右  3-5=下左中右）
         int gravity = ModuleSettings.getSecondRowGravity(ctx);
-        newSecondRow.setGravity(gravity == 0 ? android.view.Gravity.START
-                : gravity == 2 ? android.view.Gravity.END : android.view.Gravity.CENTER_HORIZONTAL);
+        // 水平方向：0,3=左  1,4=中  2,5=右
+        int hGravity = (gravity <= 2) ? gravity : gravity - 3;
+        newSecondRow.setGravity(hGravity == 0 ? android.view.Gravity.START
+                : hGravity == 2 ? android.view.Gravity.END : android.view.Gravity.CENTER_HORIZONTAL);
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -369,6 +371,9 @@ public class MoreBubbleHookModule extends XposedModule {
         View abv = actionsParent.findViewById(abId);
         if (abv != null) insertIndex = actionsParent.indexOfChild(abv) + 1;
 
+        // gravity 0-2=上方  3-5=下方
+        boolean isAbove = gravity <= 2;
+
         FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
@@ -379,11 +384,16 @@ public class MoreBubbleHookModule extends XposedModule {
                 int[] loc = new int[2], pLoc = new int[2];
                 abv.getLocationOnScreen(loc);
                 actionsParent.getLocationOnScreen(pLoc);
-                int bottom = loc[1] - pLoc[1] + abv.getHeight();
                 int topId = res.getIdentifier("overview_actions_top_margin", "dimen", pkg);
                 int spacing = topId != 0 ? res.getDimensionPixelSize(topId) : 24;
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
-                lp.topMargin = bottom + spacing;
+                if (isAbove) {
+                    // 上方：topMargin = action_buttons 的 top - 按钮高度 - 间距
+                    lp.topMargin = loc[1] - pLoc[1] - newSecondRow.getHeight() - spacing;
+                } else {
+                    // 下方：topMargin = action_buttons 的 bottom + 间距
+                    lp.topMargin = loc[1] - pLoc[1] + abv.getHeight() + spacing;
+                }
                 newSecondRow.setLayoutParams(lp);
             }
             actionsParent.getViewTreeObserver().addOnPreDrawListener(

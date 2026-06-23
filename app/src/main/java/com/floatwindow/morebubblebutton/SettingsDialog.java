@@ -56,7 +56,7 @@ public class SettingsDialog {
         sliderContainer.setVisibility(currentMode == 1 ? View.VISIBLE : View.GONE);
         sliderContainer.setPadding(dp(ctx, 8), dp(ctx, 4), dp(ctx, 8), dp(ctx, 4));
 
-        sliderContainer.addView(createSectionLabel(ctx, "位置：左 ← → 右"));
+        sliderContainer.addView(createSectionLabel(ctx, "位置方向"));
 
         TextView sliderValue = new TextView(ctx);
         sliderValue.setTextSize(12);
@@ -205,21 +205,36 @@ public class SettingsDialog {
     }
 
     private static int progressToGravity(int progress) {
-        if (progress < 33) return 0;
-        if (progress < 66) return 1;
-        return 2;
+        if (progress < 17) return 0;
+        if (progress < 33) return 1;
+        if (progress < 50) return 2;
+        if (progress < 67) return 3;
+        if (progress < 83) return 4;
+        return 5;
     }
 
     private static int gravityToProgress(int gravity) {
-        if (gravity == 0) return 0;
-        if (gravity == 2) return 100;
-        return 50;
+        switch (gravity) {
+            case 0: return 8;
+            case 1: return 25;
+            case 2: return 41;
+            case 3: return 58;
+            case 4: return 75;
+            case 5: return 92;
+            default: return 50;
+        }
     }
 
     private static String gravityToText(int gravity) {
-        if (gravity == 0) return "← 左侧";
-        if (gravity == 2) return "右侧 →";
-        return "居中";
+        switch (gravity) {
+            case 0: return "↖ 上左";
+            case 1: return "↑ 上中";
+            case 2: return "↗ 上右";
+            case 3: return "↙ 下左";
+            case 4: return "↓ 下中";
+            case 5: return "↘ 下右";
+            default: return "居中";
+        }
     }
 
     private static int dp(Context ctx, int dp) {
