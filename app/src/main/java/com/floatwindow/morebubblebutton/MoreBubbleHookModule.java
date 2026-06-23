@@ -356,11 +356,9 @@ public class MoreBubbleHookModule extends XposedModule {
         int posX = ModuleSettings.getPosX(ctx);
         int posY = ModuleSettings.getPosY(ctx);
 
-        // X 轴：水平对齐
-        int hGravity;
-        if (posX < 33) hGravity = android.view.Gravity.START;
-        else if (posX > 66) hGravity = android.view.Gravity.END;
-        else hGravity = android.view.Gravity.CENTER_HORIZONTAL;
+        // X 轴：用 marginStart 连续定位（不再用离散 gravity）
+        // posX 0%=左对齐, 50%=居中, 100%=右对齐
+        float density = ctx.getResources().getDisplayMetrics().density;
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -370,21 +368,33 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.addView(btn);
         bubbleButton = btn;
 
-        // 定位：和 action_buttons 一样用 layout_gravity=center|bottom
-        // Y 轴通过 bottomMargin 微调偏移
+        // 定位：用 layout_gravity=center|bottom 垂直定位，margin 水平定位
         FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        rowLp.gravity = hGravity | android.view.Gravity.BOTTOM;
+        rowLp.gravity = android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.BOTTOM;
 
-        // Y 偏移：posY 0% = 紧贴底部（与 action_buttons 齐平），100% = 向上偏移 48dp
-        float density = ctx.getResources().getDisplayMetrics().density;
+        // Y 偏移：posY 0% = 紧贴底部，100% = 向上偏移 48dp
         int maxOffset = (int)(48 * density);
         int bottomOffset = (int)((posY / 100f) * maxOffset);
         rowLp.bottomMargin = bottomOffset;
 
-        // X 偏移补偿：图标在左侧导致视觉偏右，居中时向左偏移 12dp
-        if (hGravity == android.view.Gravity.CENTER_HORIZONTAL) {
-            rowLp.setMarginStart(-(int)(9 * density));
+        // X 偏移：posX 0%=左对齐 50%=居中(含9dp补偿) 100%=右对齐
+        // 用 marginStart 实现连续定位
+        int parentWidth = actionsParent.getWidth();
+        int btnWidth = newSecondRow.getWidth();
+        if (btnWidth > 0 && parentWidth > 0) {
+            // 0% → marginStart=0（左对齐）
+            // 50% → marginStart = (parentWidth - btnWidth) / 2 - 9dp（居中偏左）
+            // 100% → marginStart = parentWidth - btnWidth（右对齐）
+            float halfScreen = (parentWidth - btnWidth) / 2f;
+            float centerMargin = halfScreen - 9 * density;
+            float maxMargin = parentWidth - btnWidth;
+            int marginStart = (int)((posX / 100f) * maxMargin);
+            // 50% 时强制居中偏左
+            if (posX >= 48 && posX <= 52) {
+                marginStart = (int) centerMargin;
+            }
+            rowLp.setMarginStart((int) Math.max(0, Math.min(marginStart, maxMargin)));
         }
 
         int insertIndex = 0;
