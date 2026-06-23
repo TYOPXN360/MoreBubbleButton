@@ -384,7 +384,7 @@ public class MoreBubbleHookModule extends XposedModule {
 
         // X 偏移补偿：图标在左侧导致视觉偏右，居中时向左偏移 12dp
         if (hGravity == android.view.Gravity.CENTER_HORIZONTAL) {
-            rowLp.setMarginStart(-(int)(12 * density));
+            rowLp.setMarginStart(-(int)(10 * density));
         }
 
         int insertIndex = 0;
