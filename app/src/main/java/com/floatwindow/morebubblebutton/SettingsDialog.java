@@ -3,6 +3,7 @@ package com.floatwindow.morebubblebutton;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
@@ -33,59 +34,47 @@ public class SettingsDialog {
                 (btn, checked) -> ModuleSettings.setActionBarEnabled(ctx, checked)));
 
         // 3. 位置模式选择
-        TextView modeLabel = new TextView(ctx);
-        modeLabel.setText("按钮位置");
-        modeLabel.setTextSize(16);
-        modeLabel.setTextColor(ctx.getColor(android.R.color.white));
-        modeLabel.setPadding(0, dp(ctx, 12), 0, dp(ctx, 4));
-        layout.addView(modeLabel);
+        layout.addView(createSectionLabel(ctx, "按钮位置"));
 
         int currentMode = ModuleSettings.getPositionMode(ctx);
-
-        // 模式选项：跟随原按钮 / 第二行
         String[] modes = {"跟随原按钮", "第二行"};
         LinearLayout modeRow = new LinearLayout(ctx);
         modeRow.setOrientation(LinearLayout.HORIZONTAL);
+        modeRow.setGravity(Gravity.CENTER);
         TextView[] modeBtns = new TextView[2];
         for (int i = 0; i < 2; i++) {
             final int m = i;
-            TextView b = new TextView(ctx);
-            b.setText(modes[i]);
-            b.setTextSize(14);
-            b.setPadding(dp(ctx, 16), dp(ctx, 8), dp(ctx, 16), dp(ctx, 8));
-            b.setTextColor(ctx.getColor(i == currentMode ? android.R.color.holo_blue_light : android.R.color.white));
+            TextView b = createModeBtn(ctx, modes[i], i == currentMode);
             modeRow.addView(b);
             modeBtns[i] = b;
         }
         layout.addView(modeRow);
 
-        // 4. 第二行位置滑动条（仅第二行模式下显示）
+        // 4. 第二行位置滑动条
         LinearLayout sliderContainer = new LinearLayout(ctx);
         sliderContainer.setOrientation(LinearLayout.VERTICAL);
         sliderContainer.setVisibility(currentMode == 1 ? View.VISIBLE : View.GONE);
+        applyBackground(ctx, sliderContainer);
 
-        TextView sliderLabel = new TextView(ctx);
-        sliderLabel.setText("位置：左 ← → 右");
-        sliderLabel.setTextSize(14);
-        sliderLabel.setTextColor(ctx.getColor(android.R.color.white));
-        sliderLabel.setPadding(0, dp(ctx, 8), 0, dp(ctx, 4));
-        sliderContainer.addView(sliderLabel);
+        sliderContainer.addView(createSectionLabel(ctx, "位置：左 ← → 右"));
 
         TextView sliderValue = new TextView(ctx);
         sliderValue.setTextSize(12);
         sliderValue.setTextColor(0xAAFFFFFF);
+        sliderValue.setPadding(dp(ctx, 8), 0, 0, dp(ctx, 4));
         sliderContainer.addView(sliderValue);
 
         SeekBar seekBar = new SeekBar(ctx);
         seekBar.setMax(100);
         int curGravity = ModuleSettings.getSecondRowGravity(ctx);
         seekBar.setProgress(gravityToProgress(curGravity));
-        sliderValue.setText(gravityToText(ctx, curGravity));
+        sliderValue.setText(gravityToText(curGravity));
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
                 if (fromUser) {
-                    ModuleSettings.setSecondRowGravity(ctx, progressToGravity(progress));
-                    sliderValue.setText(gravityToText(ctx, progressToGravity(progress)));
+                    int g = progressToGravity(progress);
+                    ModuleSettings.setSecondRowGravity(ctx, g);
+                    sliderValue.setText(gravityToText(g));
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar sb) {}
@@ -99,29 +88,26 @@ public class SettingsDialog {
         restartBtn.setText("重启启动器");
         restartBtn.setTextSize(15);
         restartBtn.setTextColor(ctx.getColor(android.R.color.holo_red_light));
-        restartBtn.setPadding(dp(ctx, 16), dp(ctx, 12), dp(ctx, 16), dp(ctx, 4));
+        restartBtn.setPadding(dp(ctx, 16), dp(ctx, 12), dp(ctx, 16), dp(ctx, 12));
         restartBtn.setGravity(Gravity.CENTER);
+        applyBackground(ctx, restartBtn);
         restartBtn.setOnClickListener(v -> {
-            try {
-                android.os.Handler h = new android.os.Handler(Looper.getMainLooper());
-                h.postDelayed(() -> {
-                    try {
-                        Runtime.getRuntime().exec(new String[]{
-                                "am", "force-stop", "com.google.android.apps.nexuslauncher"});
-                    } catch (Throwable ignored) {}
-                }, 300);
-            } catch (Throwable ignored) {}
+            new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> {
+                try {
+                    Runtime.getRuntime().exec(new String[]{
+                            "am", "force-stop", "com.google.android.apps.nexuslauncher"});
+                } catch (Throwable ignored) {}
+            }, 300);
         });
         layout.addView(restartBtn);
 
-        // 设置模式切换联动
+        // 模式切换联动
         for (int i = 0; i < 2; i++) {
             final int m = i;
             modeBtns[i].setOnClickListener(v -> {
                 ModuleSettings.setPositionMode(ctx, m);
                 for (int j = 0; j < 2; j++)
-                    modeBtns[j].setTextColor(ctx.getColor(j == m ?
-                            android.R.color.holo_blue_light : android.R.color.white));
+                    modeBtns[j].setSelected(j == m);
                 sliderContainer.setVisibility(m == 1 ? View.VISIBLE : View.GONE);
             });
         }
@@ -134,29 +120,23 @@ public class SettingsDialog {
                 .show();
     }
 
-    /** progress 0-100 → gravity: 0=左 1=中 2=右 */
-    private static int progressToProgress(int progress) {
-        if (progress < 33) return 0;
-        if (progress < 66) return 1;
-        return 2;
+    /** 给 View 添加圆角背景框 */
+    private static void applyBackground(Context ctx, View view) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(dp(ctx, 8));
+        bg.setColor(0x22FFFFFF);
+        bg.setStroke(dp(ctx, 1), 0x44FFFFFF);
+        view.setBackground(bg);
     }
 
-    private static int progressToGravity(int progress) {
-        if (progress < 33) return 0; // 左
-        if (progress < 66) return 1; // 中
-        return 2; // 右
-    }
-
-    private static int gravityToProgress(int gravity) {
-        if (gravity == 0) return 0;
-        if (gravity == 2) return 100;
-        return 50;
-    }
-
-    private static String gravityToText(Context ctx, int gravity) {
-        if (gravity == 0) return "← 左侧";
-        if (gravity == 2) return "右侧 →";
-        return "居中";
+    private static TextView createSectionLabel(Context ctx, String text) {
+        TextView label = new TextView(ctx);
+        label.setText(text);
+        label.setTextSize(14);
+        label.setTextColor(0xAAFFFFFF);
+        label.setPadding(0, dp(ctx, 10), 0, dp(ctx, 4));
+        return label;
     }
 
     @SuppressLint("UseSwitchCompatOrMaterialCode")
@@ -164,7 +144,8 @@ public class SettingsDialog {
             boolean checked, android.widget.CompoundButton.OnCheckedChangeListener listener) {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(0, dp(ctx, 8), 0, dp(ctx, 8));
+        row.setPadding(dp(ctx, 12), dp(ctx, 8), dp(ctx, 12), dp(ctx, 8));
+        applyBackground(ctx, row);
 
         LinearLayout header = new LinearLayout(ctx);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -194,6 +175,35 @@ public class SettingsDialog {
         row.setClickable(true);
         row.setOnClickListener(v -> sw.setChecked(!sw.isChecked()));
         return row;
+    }
+
+    private static TextView createModeBtn(Context ctx, String text, boolean selected) {
+        TextView b = new TextView(ctx);
+        b.setText(text);
+        b.setTextSize(14);
+        b.setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10));
+        b.setGravity(Gravity.CENTER);
+        b.setSelected(selected);
+        applyBackground(ctx, b);
+        return b;
+    }
+
+    private static int progressToGravity(int progress) {
+        if (progress < 33) return 0;
+        if (progress < 66) return 1;
+        return 2;
+    }
+
+    private static int gravityToProgress(int gravity) {
+        if (gravity == 0) return 0;
+        if (gravity == 2) return 100;
+        return 50;
+    }
+
+    private static String gravityToText(int gravity) {
+        if (gravity == 0) return "← 左侧";
+        if (gravity == 2) return "右侧 →";
+        return "居中";
     }
 
     private static int dp(Context ctx, int dp) {
