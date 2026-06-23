@@ -266,6 +266,26 @@ public class MoreBubbleHookModule extends XposedModule {
         btn.setLayoutParams(mlp);
         actionButtons.addView(btn);
         bubbleButton = btn;
+
+        // 捕获 RecentsView（从 actionsParent 的 parent 链查找）
+        if (recentsViewInstance == null) {
+            try {
+                Class<?> rvCls = mLauncherClassLoader.loadClass(
+                        "com.android.quickstep.views.RecentsView");
+                View cur = actionsParent;
+                while (cur != null) {
+                    if (rvCls.isInstance(cur)) {
+                        recentsViewInstance = cur;
+                        log(Log.INFO, TAG, "Captured RecentsView in follow mode: " + cur);
+                        break;
+                    }
+                    cur = (cur.getParent() instanceof View) ? (View) cur.getParent() : null;
+                }
+            } catch (Throwable t) {
+                log(Log.WARN, TAG, "Capture RecentsView failed: " + t.getMessage());
+            }
+        }
+
         log(Log.INFO, TAG, "Bubble button added to action_buttons (follow mode)");
     }
 
@@ -502,12 +522,31 @@ public class MoreBubbleHookModule extends XposedModule {
     private Object findRecentsViewFromHierarchy(View view) {
         try {
             Class<?> rvCls = mLauncherClassLoader.loadClass("com.android.quickstep.views.RecentsView");
+            // 先从 parent 链查找
             View cur = view;
             while (cur != null) {
                 if (rvCls.isInstance(cur)) { recentsViewInstance = cur; return cur; }
                 cur = (cur.getParent() instanceof View) ? (View) cur.getParent() : null;
             }
+            // parent 链找不到，从 rootView 递归搜索
+            View root = view.getRootView();
+            if (root != null) {
+                cur = findInTree(root, rvCls);
+                if (cur != null) { recentsViewInstance = cur; return cur; }
+            }
         } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private View findInTree(View view, Class<?> cls) {
+        if (cls.isInstance(view)) return view;
+        if (view instanceof ViewGroup) {
+            ViewGroup vg = (ViewGroup) view;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                View f = findInTree(vg.getChildAt(i), cls);
+                if (f != null) return f;
+            }
+        }
         return null;
     }
 
