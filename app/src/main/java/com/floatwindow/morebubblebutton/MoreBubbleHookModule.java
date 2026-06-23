@@ -271,13 +271,9 @@ public class MoreBubbleHookModule extends XposedModule {
         int btnWidth = sSecondRow.getWidth();
         if (btnWidth <= 0 || parentWidth <= 0) return;
 
+        // 纯百分比，不做特殊区间锁定
         float maxMargin = parentWidth - btnWidth;
         int marginStart = (int)((posX / 100f) * maxMargin);
-        // 50% 附近精确居中 + 图标补偿
-        if (posX >= 48 && posX <= 52) {
-            float centerMargin = (maxMargin / 2f) - 13 * density;
-            marginStart = (int) centerMargin;
-        }
         lp.setMarginStart((int) Math.max(0, Math.min(marginStart, maxMargin)));
         Log.i(TAG, "applyXMargin: posX=" + posX + " marginStart=" + marginStart
                 + " maxMargin=" + maxMargin + " parentW=" + parentWidth + " btnW=" + btnWidth);
@@ -452,38 +448,26 @@ public class MoreBubbleHookModule extends XposedModule {
 
         // post 里应用 X margin + 同步 alpha
         newSecondRow.post(() -> {
-            // X margin — 用 layout listener 确保宽度已计算
-            if (sSecondRow != null) {
-                sSecondRow.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
-                    @Override
-                    public void onLayoutChange(View v, int l, int t, int r, int b,
-                                               int ol, int ot, int ob, int or_) {
-                        sSecondRow.removeOnLayoutChangeListener(this);
-                        if (sSecondRow != null && sSecondRow.getWidth() > 0) {
-                            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) sSecondRow.getLayoutParams();
-                            applyXMargin(ctx, p);
-                            sSecondRow.setLayoutParams(p);
-                            Log.i(TAG, "X margin applied via layout listener");
-                        }
-                    }
-                });
-                // fallback: 直接尝试
-                applyXMargin(ctx, (FrameLayout.LayoutParams) sSecondRow.getLayoutParams());
-            }
-
-            // 同步 alpha 动画
+            // X margin + alpha 同步 — 用 OnPreDrawListener 保证每帧都正确
             View abv2 = actionsParent.findViewById(
                     res.getIdentifier("action_buttons", "id", pkg));
-            if (abv2 != null) {
-                actionsParent.getViewTreeObserver().addOnPreDrawListener(
-                        new ViewTreeObserver.OnPreDrawListener() {
-                            @Override public boolean onPreDraw() {
-                                if (sSecondRow != null && abv2 != null)
-                                    sSecondRow.setAlpha(abv2.getAlpha());
-                                return true;
+            final boolean[] xApplied = {false};
+            actionsParent.getViewTreeObserver().addOnPreDrawListener(
+                    new ViewTreeObserver.OnPreDrawListener() {
+                        @Override public boolean onPreDraw() {
+                            // X margin — 应用一次后不再修改
+                            if (!xApplied[0] && sSecondRow != null && sSecondRow.getWidth() > 0) {
+                                FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) sSecondRow.getLayoutParams();
+                                applyXMargin(ctx, p);
+                                sSecondRow.setLayoutParams(p);
+                                xApplied[0] = true;
                             }
-                        });
-            }
+                            // alpha 同步
+                            if (sSecondRow != null && abv2 != null)
+                                sSecondRow.setAlpha(abv2.getAlpha());
+                            return true;
+                        }
+                    });
         });
     }
 

@@ -19,7 +19,6 @@ public class SettingsDialog {
     @SuppressLint("UseSwitchCompatOrMaterialCode")
     public static void show(Context ctx, Runnable onDismiss) {
         Log.i("MoreBubbleModule", "SettingsDialog.show called, onDismiss=" + (onDismiss != null ? "non-null" : "null"));
-        Toast.makeText(ctx, "打开消息气泡设置", Toast.LENGTH_SHORT).show();
         LinearLayout layout = new LinearLayout(ctx);
         layout.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(ctx, 20);
