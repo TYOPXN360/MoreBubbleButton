@@ -171,6 +171,194 @@ public class MoreBubbleHookModule extends XposedModule {
         } catch (Throwable t) {
             log(Log.ERROR, TAG, "Failed to hook addMenuOptions: " + t.getMessage());
         }
+
+        // Hook SettingsActivity.LauncherSettingsFragment.onCreatePreferences — 注入设置项
+        try {
+            Class<?> settingsFragmentClass = cl.loadClass(
+                    "com.android.launcher3.settings.SettingsActivity$LauncherSettingsFragment");
+            hook(settingsFragmentClass.getMethod("onCreatePreferences", android.os.Bundle.class, String.class))
+                    .intercept(chain -> {
+                        chain.proceed();
+                        try {
+                            injectSettingsPreferences(chain.getThisObject(), cl);
+                        } catch (Throwable t) {
+                            log(Log.ERROR, TAG, "injectSettingsPreferences failed", t);
+                        }
+                        return null;
+                    });
+            log(Log.INFO, TAG, "Hooked SettingsActivity OK");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "Failed to hook SettingsActivity: " + t.getMessage());
+        }
+    }
+
+    /**
+     * 注入设置项到主屏幕设置界面
+     */
+    @SuppressLint("UseSwitchCompatOrMaterialCode")
+    private void injectSettingsPreferences(Object fragment, ClassLoader cl) {
+        try {
+            // 获取 PreferenceScreen
+            Method getPreferenceScreen = findMethod(fragment.getClass(), "getPreferenceScreen");
+            Object preferenceScreen = getPreferenceScreen.invoke(fragment);
+            if (preferenceScreen == null) {
+                log(Log.WARN, TAG, "PreferenceScreen is null");
+                return;
+            }
+
+            // 获取 Context — 通过反射调用 requireContext()
+            Method requireContext = findMethod(fragment.getClass(), "requireContext");
+            Context ctx = (Context) requireContext.invoke(fragment);
+            Class<?> switchPrefClass = cl.loadClass("androidx.preference.SwitchPreference");
+            Class<?> prefClass = cl.loadClass("androidx.preference.Preference");
+            Class<?> prefScreenClass = cl.loadClass("androidx.preference.PreferenceScreen");
+
+            // 创建分类标题
+            Object category = createPreference(ctx, prefClass, "more_bubble_category",
+                    "消息气泡设置", null, -1);
+            if (category != null) {
+                addPreference(preferenceScreen, category, prefScreenClass);
+            }
+
+            // 开关1: 任务卡片菜单
+            Object menuSwitch = createSwitchPreference(ctx, switchPrefClass,
+                    "pref_bubble_menu_enabled", "任务卡片菜单",
+                    "在多任务界面点击 app 图标弹出的菜单中显示「消息气泡」",
+                    ModuleSettings.isMenuEnabled(ctx));
+            if (menuSwitch != null) {
+                addPreference(preferenceScreen, menuSwitch, prefScreenClass);
+            }
+
+            // 开关2: 底部操作栏
+            Object actionBarSwitch = createSwitchPreference(ctx, switchPrefClass,
+                    "pref_bubble_actionbar_enabled", "底部操作栏",
+                    "在多任务界面底部显示「消息气泡」按钮",
+                    ModuleSettings.isActionBarEnabled(ctx));
+            if (actionBarSwitch != null) {
+                addPreference(preferenceScreen, actionBarSwitch, prefScreenClass);
+            }
+
+            // 位置选择
+            Object positionPref = createPreference(ctx, prefClass,
+                    "pref_bubble_position", "底部按钮位置",
+                    get当前位置文本(ctx), -1);
+            if (positionPref != null) {
+                // 设置点击监听
+                Method setOnPreferenceClickListener = findMethod(prefClass,
+                        "setOnPreferenceClickListener",
+                        cl.loadClass("androidx.preference.Preference$OnPreferenceClickListener"));
+                if (setOnPreferenceClickListener != null) {
+                    // 创建点击监听器
+                    Object listener = java.lang.reflect.Proxy.newProxyInstance(
+                            cl.loadClass("androidx.preference.Preference$OnPreferenceClickListener").getClassLoader(),
+                            new Class[]{cl.loadClass("androidx.preference.Preference$OnPreferenceClickListener")},
+                            (proxy, method, args) -> {
+                                if ("onPreferenceClick".equals(method.getName())) {
+                                    showPositionDialog(ctx, positionPref, cl);
+                                    return true;
+                                }
+                                return false;
+                            });
+                    setOnPreferenceClickListener.invoke(positionPref, listener);
+                }
+                addPreference(preferenceScreen, positionPref, prefScreenClass);
+            }
+
+            log(Log.INFO, TAG, "Settings preferences injected");
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "injectSettingsPreferences failed: " + t.getMessage());
+        }
+    }
+
+    private Object createPreference(Context ctx, Class<?> prefClass, String key,
+            String title, String summary, int order) {
+        try {
+            java.lang.reflect.Constructor<?> ctor = prefClass.getConstructor(Context.class);
+            Object pref = ctor.newInstance(ctx);
+            // 设置 key
+            Method setKey = findMethod(prefClass, "setKey", String.class);
+            setKey.invoke(pref, key);
+            // 设置 title
+            Method setTitle = findMethod(prefClass, "setTitle", CharSequence.class);
+            setTitle.invoke(pref, title);
+            // 设置 summary
+            if (summary != null) {
+                Method setSummary = findMethod(prefClass, "setSummary", CharSequence.class);
+                setSummary.invoke(pref, summary);
+            }
+            // 设置 order
+            if (order >= 0) {
+                Method setOrder = findMethod(prefClass, "setOrder", int.class);
+                setOrder.invoke(pref, order);
+            }
+            return pref;
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "createPreference failed: " + t.getMessage());
+            return null;
+        }
+    }
+
+    private Object createSwitchPreference(Context ctx, Class<?> switchPrefClass,
+            String key, String title, String summary, boolean defaultValue) {
+        try {
+            java.lang.reflect.Constructor<?> ctor = switchPrefClass.getConstructor(Context.class);
+            Object pref = ctor.newInstance(ctx);
+            Method setKey = findMethod(switchPrefClass, "setKey", String.class);
+            setKey.invoke(pref, key);
+            Method setTitle = findMethod(switchPrefClass, "setTitle", CharSequence.class);
+            setTitle.invoke(pref, title);
+            Method setSummary = findMethod(switchPrefClass, "setSummary", CharSequence.class);
+            setSummary.invoke(pref, summary);
+            Method setDefaultValue = findMethod(switchPrefClass, "setDefaultValue", Object.class);
+            setDefaultValue.invoke(pref, defaultValue);
+            return pref;
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "createSwitchPreference failed: " + t.getMessage());
+            return null;
+        }
+    }
+
+    private void addPreference(Object preferenceScreen, Object preference, Class<?> prefScreenClass) {
+        try {
+            Method addPreference = findMethod(prefScreenClass, "addPreference", 
+                    Class.forName("androidx.preference.Preference"));
+            addPreference.invoke(preferenceScreen, preference);
+        } catch (Throwable t) {
+            log(Log.WARN, TAG, "addPreference failed: " + t.getMessage());
+        }
+    }
+
+    private String get当前位置文本(Context ctx) {
+        int pos = ModuleSettings.getBottomPosition(ctx);
+        switch (pos) {
+            case 0: return "左侧";
+            case 2: return "右侧";
+            default: return "居中";
+        }
+    }
+
+    private void showPositionDialog(Context ctx, Object positionPref, ClassLoader cl) {
+        try {
+            String[] positions = {"左侧", "居中", "右侧"};
+            int current = ModuleSettings.getBottomPosition(ctx);
+
+            new android.app.AlertDialog.Builder(ctx)
+                    .setTitle("底部按钮位置")
+                    .setSingleChoiceItems(positions, current, (dialog, which) -> {
+                        ModuleSettings.setBottomPosition(ctx, which);
+                        // 更新 summary
+                        try {
+                            Method setSummary = findMethod(
+                                    Class.forName("androidx.preference.Preference"),
+                                    "setSummary", CharSequence.class);
+                            setSummary.invoke(positionPref, get当前位置文本(ctx));
+                        } catch (Throwable ignored) {}
+                        dialog.dismiss();
+                    })
+                    .show();
+        } catch (Throwable t) {
+            log(Log.ERROR, TAG, "showPositionDialog failed: " + t.getMessage());
+        }
     }
 
     // ==================== 按钮注入 ====================
