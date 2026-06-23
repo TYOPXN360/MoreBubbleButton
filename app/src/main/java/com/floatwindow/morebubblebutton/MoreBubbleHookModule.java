@@ -271,9 +271,10 @@ public class MoreBubbleHookModule extends XposedModule {
         int btnWidth = sSecondRow.getWidth();
         if (btnWidth <= 0 || parentWidth <= 0) return;
 
-        // 纯百分比，不做特殊区间锁定
+        // 纯百分比，50%居中时自动补偿图标偏移
+        int iconOffset = (int)(13 * density); // 图标左置补偿
         float maxMargin = parentWidth - btnWidth;
-        int marginStart = (int)((posX / 100f) * maxMargin);
+        int marginStart = (int)((posX / 100f) * maxMargin) - iconOffset;
         lp.setMarginStart((int) Math.max(0, Math.min(marginStart, maxMargin)));
         Log.i(TAG, "applyXMargin: posX=" + posX + " marginStart=" + marginStart
                 + " maxMargin=" + maxMargin + " parentW=" + parentWidth + " btnW=" + btnWidth);
