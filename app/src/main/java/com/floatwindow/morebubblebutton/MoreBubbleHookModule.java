@@ -127,39 +127,34 @@ public class MoreBubbleHookModule extends XposedModule {
                 }
             }
 
-            // 1. 分类标题
-            Object cat = newPref(prefCls, ctx, "more_bubble_category", "消息气泡设置", null);
-            if (cat != null) addPref(screen, cat, cl);
+            // 创建一个"消息气泡"Preference
+            Object pref = prefCls.getDeclaredConstructor(Context.class, AttributeSet.class, int.class, int.class)
+                    .newInstance(ctx, null, android.R.attr.preferenceStyle, 0);
+            setKey(pref, "pref_more_bubble", prefCls);
+            callM(pref, "setTitle", "消息气泡");
+            callM(pref, "setSummary", "自定义消息气泡按钮的显示和位置");
 
-            // 2. 任务卡片菜单开关
-            Object menuSw = newSwitch(cl, ctx, "pref_bubble_menu_enabled", "任务卡片菜单",
-                    "在多任务界面点击 app 图标弹出的菜单中显示「消息气泡」",
-                    ModuleSettings.isMenuEnabled(ctx));
-            if (menuSw != null) addPref(screen, menuSw, cl);
-
-            // 3. 底部操作栏开关
-            Object barSw = newSwitch(cl, ctx, "pref_bubble_actionbar_enabled", "底部操作栏",
-                    "在多任务界面底部显示「消息气泡」按钮",
-                    ModuleSettings.isActionBarEnabled(ctx));
-            if (barSw != null) addPref(screen, barSw, cl);
-
-            // 4. 位置选择
-            Object posPref = newPref(prefCls, ctx, "pref_bubble_position", "底部按钮位置", getPosText(ctx));
-            if (posPref != null && clickCls != null) {
+            // 点击打开设置对话框
+            if (clickCls != null) {
                 Object listener = java.lang.reflect.Proxy.newProxyInstance(
                         clickCls.getClassLoader(), new Class[]{clickCls},
-                        (p, m, a) -> { if ("onPreferenceClick".equals(m.getName())) {
-                            showPosDialog(ctx, posPref); return true; } return false; });
+                        (p, m, a) -> {
+                            if ("onPreferenceClick".equals(m.getName())) {
+                                SettingsDialog.show(ctx, null);
+                                return true;
+                            }
+                            return false;
+                        });
                 if (clickField != null) {
                     java.lang.reflect.Field f = prefCls.getDeclaredField(clickField);
-                    f.setAccessible(true); f.set(posPref, listener);
+                    f.setAccessible(true); f.set(pref, listener);
                 } else {
-                    prefCls.getMethod("setOnPreferenceClickListener", clickCls).invoke(posPref, listener);
+                    prefCls.getMethod("setOnPreferenceClickListener", clickCls).invoke(pref, listener);
                 }
             }
-            if (posPref != null) addPref(screen, posPref, cl);
 
-            log(Log.INFO, TAG, "Settings injected");
+            addPref(screen, pref, cl);
+            log(Log.INFO, TAG, "Settings entry injected");
         } catch (Throwable t) { log(Log.ERROR, TAG, "injectSettings: " + t.getMessage()); }
     }
 
