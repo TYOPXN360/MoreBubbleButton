@@ -90,7 +90,13 @@ public class MoreBubbleHookModule extends XposedModule {
             Class<?> clazz = cl.loadClass("com.android.quickstep.views.OverviewActionsView");
             hook(clazz.getMethod("onFinishInflate")).intercept(chain -> {
                 Object ret = chain.proceed();
-                try { injectBubbleButton(chain.getThisObject(), cl); }
+                try {
+                    // 检查设置：底部操作栏按钮是否启用
+                    Context ctx = ((View) chain.getThisObject()).getContext();
+                    if (ModuleSettings.isActionBarEnabled(ctx)) {
+                        injectBubbleButton(chain.getThisObject(), cl);
+                    }
+                }
                 catch (Throwable t) { log(Log.ERROR, TAG, "inject failed", t); }
                 return ret;
             });
@@ -151,7 +157,11 @@ public class MoreBubbleHookModule extends XposedModule {
             hook(menuViewClass.getDeclaredMethod("addMenuOptions")).intercept(chain -> {
                 chain.proceed(); // 先执行原始菜单添加
                 try {
-                    addBubbleMenuOption(chain.getThisObject(), cl);
+                    // 检查设置：菜单项是否启用
+                    Context ctx = ((View) chain.getThisObject()).getContext();
+                    if (ModuleSettings.isMenuEnabled(ctx)) {
+                        addBubbleMenuOption(chain.getThisObject(), cl);
+                    }
                 } catch (Throwable t) {
                     log(Log.ERROR, TAG, "addBubbleMenuOption failed", t);
                 }
@@ -222,6 +232,19 @@ public class MoreBubbleHookModule extends XposedModule {
             if (icon != null) btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
         }
         btn.setOnClickListener(v -> onBubbleButtonClick((View) btn.getParent().getParent()));
+        // 长按打开设置
+        btn.setOnLongClickListener(v -> {
+            Context settingsCtx = v.getContext();
+            SettingsDialog.show(settingsCtx, () -> {
+                // 设置关闭后，隐藏/显示按钮
+                if (!ModuleSettings.isActionBarEnabled(settingsCtx) && secondRow != null) {
+                    secondRow.setVisibility(View.GONE);
+                } else if (ModuleSettings.isActionBarEnabled(settingsCtx) && secondRow != null) {
+                    secondRow.setVisibility(View.VISIBLE);
+                }
+            });
+            return true;
+        });
         return btn;
     }
 
@@ -251,7 +274,14 @@ public class MoreBubbleHookModule extends XposedModule {
         LinearLayout newSecondRow = new LinearLayout(ctx);
         newSecondRow.setTag("bubble_second_row");
         newSecondRow.setOrientation(LinearLayout.HORIZONTAL);
-        newSecondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+
+        // 应用位置设置
+        int position = ModuleSettings.getBottomPosition(ctx);
+        switch (position) {
+            case 0: newSecondRow.setGravity(android.view.Gravity.START); break;
+            case 2: newSecondRow.setGravity(android.view.Gravity.END); break;
+            default: newSecondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL); break;
+        }
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
