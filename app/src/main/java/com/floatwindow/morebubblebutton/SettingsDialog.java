@@ -98,18 +98,23 @@ public class SettingsDialog {
         bg.setStroke(dp(ctx, 1), 0x44FFFFFF);
         restartBtn.setBackground(bg);
         restartBtn.setOnClickListener(v -> {
-            Context appCtx = v.getContext().getApplicationContext();
             new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> {
                 try {
-                    // 使用 Runtime.exec 调用 am 命令
-                    Process p = Runtime.getRuntime().exec(new String[]{"/system/bin/am", "force-stop", "com.google.android.apps.nexuslauncher"});
-                    p.waitFor();
-                } catch (Throwable t) {
-                    // 降级：直接杀进程
-                    try {
-                        android.os.Process.killProcess(android.os.Process.myPid());
-                    } catch (Throwable ignored) {}
-                }
+                    // 获取启动器进程 PID 并杀掉，系统会自动重启
+                    android.app.ActivityManager am = (android.app.ActivityManager)
+                            v.getContext().getSystemService(Context.ACTIVITY_SERVICE);
+                    // 获取当前进程信息
+                    android.app.ActivityManager.RunningAppProcessInfo myProc = null;
+                    for (android.app.ActivityManager.RunningAppProcessInfo proc : am.getRunningAppProcesses()) {
+                        if (proc.processName.contains("nexuslauncher")) {
+                            myProc = proc;
+                            break;
+                        }
+                    }
+                    if (myProc != null) {
+                        android.os.Process.killProcess(myProc.pid);
+                    }
+                } catch (Throwable ignored) {}
             }, 300);
         });
         layout.addView(restartBtn);
