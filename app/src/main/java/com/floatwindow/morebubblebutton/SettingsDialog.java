@@ -215,6 +215,7 @@ public class SettingsDialog {
         row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(0, dp(ctx, 6), 0, dp(ctx, 6));
 
+        // 标题行
         LinearLayout header = new LinearLayout(ctx);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -229,26 +230,56 @@ public class SettingsDialog {
         val.setTextSize(12);
         val.setTextColor(0xAAFFFFFF);
         val.setText(curValue + "%");
-        val.setPadding(dp(ctx, 8), 0, 0, 0);
 
         header.addView(lbl);
         header.addView(val);
         row.addView(header);
 
+        // [-] 滑动条 [+] 行
+        LinearLayout sliderRow = new LinearLayout(ctx);
+        sliderRow.setOrientation(LinearLayout.HORIZONTAL);
+        sliderRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView minusBtn = new TextView(ctx);
+        minusBtn.setText("−");
+        minusBtn.setTextSize(20);
+        minusBtn.setTextColor(ctx.getColor(android.R.color.white));
+        minusBtn.setPadding(dp(ctx, 12), dp(ctx, 4), dp(ctx, 12), dp(ctx, 4));
+        minusBtn.setGravity(Gravity.CENTER);
+
         SeekBar bar = new SeekBar(ctx);
         bar.setMax(100);
         bar.setProgress(curValue);
+        bar.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView plusBtn = new TextView(ctx);
+        plusBtn.setText("+");
+        plusBtn.setTextSize(20);
+        plusBtn.setTextColor(ctx.getColor(android.R.color.white));
+        plusBtn.setPadding(dp(ctx, 12), dp(ctx, 4), dp(ctx, 12), dp(ctx, 4));
+        plusBtn.setGravity(Gravity.CENTER);
+
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                if (fromUser) {
-                    onChange.accept(progress);
-                    val.setText(progress + "%");
-                }
+                if (fromUser) { onChange.accept(progress); val.setText(progress + "%"); }
             }
             @Override public void onStartTrackingTouch(SeekBar sb) {}
             @Override public void onStopTrackingTouch(SeekBar sb) {}
         });
-        row.addView(bar);
+
+        minusBtn.setOnClickListener(v -> {
+            int next = Math.max(0, bar.getProgress() - 1);
+            bar.setProgress(next); onChange.accept(next); val.setText(next + "%");
+        });
+        plusBtn.setOnClickListener(v -> {
+            int next = Math.min(100, bar.getProgress() + 1);
+            bar.setProgress(next); onChange.accept(next); val.setText(next + "%");
+        });
+
+        sliderRow.addView(minusBtn);
+        sliderRow.addView(bar);
+        sliderRow.addView(plusBtn);
+        row.addView(sliderRow);
         return row;
     }
 
