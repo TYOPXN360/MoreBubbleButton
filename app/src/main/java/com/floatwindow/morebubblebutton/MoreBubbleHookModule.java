@@ -241,7 +241,7 @@ public class MoreBubbleHookModule extends XposedModule {
 
         // Y 偏移
         int maxOffset = (int)(48 * density);
-        lp.bottomMargin = (int)((posY / 100f) * maxOffset);
+        lp.bottomMargin = (int)(Math.min(posY * 1.4f, 100f) / 100f * maxOffset);
 
         // X margin — 需要等 View 宽度可用
         if (sSecondRow != null && sSecondRow.getWidth() > 0) {
@@ -415,7 +415,7 @@ public class MoreBubbleHookModule extends XposedModule {
 
         // Y 偏移：posY 0% = 紧贴底部，100% = 向上偏移 48dp
         int maxOffset = (int)(48 * density);
-        int bottomOffset = (int)((posY / 100f) * maxOffset);
+        int bottomOffset = (int)(Math.min(posY * 1.4f, 100f) / 100f * maxOffset);
         rowLp.bottomMargin = bottomOffset;
 
         int insertIndex = 0;
@@ -665,7 +665,7 @@ public class MoreBubbleHookModule extends XposedModule {
                 // Y 偏移
                 int posY = ModuleSettings.getPosY(ctx);
                 int maxOffset = (int)(48 * density);
-                lp.bottomMargin = (int)((posY / 100f) * maxOffset);
+                lp.bottomMargin = (int)(Math.min(posY * 1.4f, 100f) / 100f * maxOffset);
 
                 // X margin — 等布局完成后应用
                 if (sSecondRow.getWidth() > 0) {
