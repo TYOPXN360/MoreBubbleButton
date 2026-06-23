@@ -400,12 +400,21 @@ public class MoreBubbleHookModule extends XposedModule {
                 int defaultSpacing = topId != 0 ? res.getDimensionPixelSize(topId) : (int)(24 * density);
 
                 // posY 0~100 映射：
-                // 0%   = action_buttons 上方间距处
+                // 0%   = action_buttons 正上方
                 // 50%  = action_buttons 正下方（默认间距）
                 // 100% = parent 底部
-                float yMin = Math.max(0, abTop - btnH - defaultSpacing);
-                float yMax = Math.max(0, parentH - btnH);
-                float targetY = yMin + (posY / 100f) * (yMax - yMin);
+                float yMin = Math.max(0, abTop - btnH);  // 上方
+                float yMax = Math.max(0, parentH - btnH); // 底部
+                float yDefault = abTop + abv.getHeight() + defaultSpacing; // 默认位置（下方间距）
+
+                // 0~50% 映射到 [yMin, yDefault]
+                // 50~100% 映射到 [yDefault, yMax]
+                float targetY;
+                if (posY <= 50) {
+                    targetY = yMin + (posY / 50f) * (yDefault - yMin);
+                } else {
+                    targetY = yDefault + ((posY - 50) / 50f) * (yMax - yDefault);
+                }
                 targetY = Math.max(0, Math.min(targetY, yMax));
 
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
@@ -413,7 +422,10 @@ public class MoreBubbleHookModule extends XposedModule {
                 newSecondRow.setLayoutParams(lp);
                 log(Log.INFO, TAG, "Y=" + posY + " margin=" + (int) targetY
                         + " range=[" + (int) yMin + "," + (int) yMax + "]"
-                        + " parentH=" + parentH + " density=" + density);
+                        + " abTop=" + abTop + " abH=" + abv.getHeight()
+                        + " btnH=" + btnH + " parentH=" + parentH
+                        + " parentLoc=" + pLoc[1] + " abLoc=" + loc[1]
+                        + " density=" + density);
             }
             actionsParent.getViewTreeObserver().addOnPreDrawListener(
                     new ViewTreeObserver.OnPreDrawListener() {
