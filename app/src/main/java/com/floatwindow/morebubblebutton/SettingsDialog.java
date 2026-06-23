@@ -54,7 +54,7 @@ public class SettingsDialog {
         LinearLayout sliderContainer = new LinearLayout(ctx);
         sliderContainer.setOrientation(LinearLayout.VERTICAL);
         sliderContainer.setVisibility(currentMode == 1 ? View.VISIBLE : View.GONE);
-        applyBackground(ctx, sliderContainer);
+        sliderContainer.setPadding(dp(ctx, 8), dp(ctx, 4), dp(ctx, 8), dp(ctx, 4));
 
         sliderContainer.addView(createSectionLabel(ctx, "位置：左 ← → 右"));
 
@@ -83,20 +83,33 @@ public class SettingsDialog {
         sliderContainer.addView(seekBar);
         layout.addView(sliderContainer);
 
-        // 5. 重启启动器按钮
+        // 重启启动器按钮
         TextView restartBtn = new TextView(ctx);
         restartBtn.setText("重启启动器");
         restartBtn.setTextSize(15);
         restartBtn.setTextColor(ctx.getColor(android.R.color.holo_red_light));
         restartBtn.setPadding(dp(ctx, 16), dp(ctx, 12), dp(ctx, 16), dp(ctx, 12));
         restartBtn.setGravity(Gravity.CENTER);
-        applyBackground(ctx, restartBtn);
+        // 只给重启按钮加背景框
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(dp(ctx, 8));
+        bg.setColor(0x22FFFFFF);
+        bg.setStroke(dp(ctx, 1), 0x44FFFFFF);
+        restartBtn.setBackground(bg);
         restartBtn.setOnClickListener(v -> {
+            Context appCtx = v.getContext().getApplicationContext();
             new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> {
                 try {
-                    Runtime.getRuntime().exec(new String[]{
-                            "am", "force-stop", "com.google.android.apps.nexuslauncher"});
-                } catch (Throwable ignored) {}
+                    // 使用 Runtime.exec 调用 am 命令
+                    Process p = Runtime.getRuntime().exec(new String[]{"/system/bin/am", "force-stop", "com.google.android.apps.nexuslauncher"});
+                    p.waitFor();
+                } catch (Throwable t) {
+                    // 降级：直接杀进程
+                    try {
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                    } catch (Throwable ignored) {}
+                }
             }, 300);
         });
         layout.addView(restartBtn);
@@ -145,7 +158,6 @@ public class SettingsDialog {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.VERTICAL);
         row.setPadding(dp(ctx, 12), dp(ctx, 8), dp(ctx, 12), dp(ctx, 8));
-        applyBackground(ctx, row);
 
         LinearLayout header = new LinearLayout(ctx);
         header.setOrientation(LinearLayout.HORIZONTAL);
@@ -184,7 +196,6 @@ public class SettingsDialog {
         b.setPadding(dp(ctx, 20), dp(ctx, 10), dp(ctx, 20), dp(ctx, 10));
         b.setGravity(Gravity.CENTER);
         b.setSelected(selected);
-        applyBackground(ctx, b);
         return b;
     }
 
