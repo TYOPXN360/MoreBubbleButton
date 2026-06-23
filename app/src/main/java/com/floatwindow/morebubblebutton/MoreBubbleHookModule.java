@@ -351,12 +351,18 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.setTag("bubble_second_row");
         newSecondRow.setOrientation(LinearLayout.HORIZONTAL);
 
-        // 使用滑动条设置的 gravity（0-2=上左中右  3-5=下左中右）
-        int gravity = ModuleSettings.getSecondRowGravity(ctx);
-        // 水平方向：0,3=左  1,4=中  2,5=右
-        int hGravity = (gravity <= 2) ? gravity : gravity - 3;
-        newSecondRow.setGravity(hGravity == 0 ? android.view.Gravity.START
-                : hGravity == 2 ? android.view.Gravity.END : android.view.Gravity.CENTER_HORIZONTAL);
+        // 使用 X/Y 坐标定位
+        int posX = ModuleSettings.getPosX(ctx);
+        int posY = ModuleSettings.getPosY(ctx);
+        // posX: 0=左对齐 50=居中 100=右对齐
+        // posY: 0=上方 50=居中 100=下方
+        if (posX < 33) {
+            newSecondRow.setGravity(android.view.Gravity.START);
+        } else if (posX > 66) {
+            newSecondRow.setGravity(android.view.Gravity.END);
+        } else {
+            newSecondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        }
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -371,8 +377,8 @@ public class MoreBubbleHookModule extends XposedModule {
         View abv = actionsParent.findViewById(abId);
         if (abv != null) insertIndex = actionsParent.indexOfChild(abv) + 1;
 
-        // gravity 0-2=上方  3-5=下方
-        boolean isAbove = gravity <= 2;
+        // 使用 Y 坐标：0=最上方 50=居中 100=最下方
+        boolean isAbove = posY < 50;
 
         FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);

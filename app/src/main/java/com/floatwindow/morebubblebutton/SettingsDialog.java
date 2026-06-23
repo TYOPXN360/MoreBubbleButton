@@ -50,37 +50,27 @@ public class SettingsDialog {
         }
         layout.addView(modeRow);
 
-        // 4. 第二行位置滑动条
+        // 4. 第二行位置滑动条（X/Y 双轴微调）
         LinearLayout sliderContainer = new LinearLayout(ctx);
         sliderContainer.setOrientation(LinearLayout.VERTICAL);
         sliderContainer.setVisibility(currentMode == 1 ? View.VISIBLE : View.GONE);
         sliderContainer.setPadding(dp(ctx, 8), dp(ctx, 4), dp(ctx, 8), dp(ctx, 4));
 
-        sliderContainer.addView(createSectionLabel(ctx, "位置方向"));
+        int curX = ModuleSettings.getPosX(ctx);
+        int curY = ModuleSettings.getPosY(ctx);
 
-        TextView sliderValue = new TextView(ctx);
-        sliderValue.setTextSize(12);
-        sliderValue.setTextColor(0xAAFFFFFF);
-        sliderValue.setPadding(dp(ctx, 8), 0, 0, dp(ctx, 4));
-        sliderContainer.addView(sliderValue);
+        // X 轴
+        sliderContainer.addView(createSliderRow(ctx, "X 轴（← 左 | 右 →）",
+                curX, (progress) -> {
+                    ModuleSettings.setPosX(ctx, progress);
+                }));
 
-        SeekBar seekBar = new SeekBar(ctx);
-        seekBar.setMax(100);
-        int curGravity = ModuleSettings.getSecondRowGravity(ctx);
-        seekBar.setProgress(gravityToProgress(curGravity));
-        sliderValue.setText(gravityToText(curGravity));
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
-                if (fromUser) {
-                    int g = progressToGravity(progress);
-                    ModuleSettings.setSecondRowGravity(ctx, g);
-                    sliderValue.setText(gravityToText(g));
-                }
-            }
-            @Override public void onStartTrackingTouch(SeekBar sb) {}
-            @Override public void onStopTrackingTouch(SeekBar sb) {}
-        });
-        sliderContainer.addView(seekBar);
+        // Y 轴
+        sliderContainer.addView(createSliderRow(ctx, "Y 轴（↑ 上 | 下 ↓）",
+                curY, (progress) -> {
+                    ModuleSettings.setPosY(ctx, progress);
+                }));
+
         layout.addView(sliderContainer);
 
         // 5. 恢复默认按钮
@@ -94,7 +84,8 @@ public class SettingsDialog {
             ModuleSettings.setMenuEnabled(ctx, true);
             ModuleSettings.setActionBarEnabled(ctx, true);
             ModuleSettings.setPositionMode(ctx, 0);
-            ModuleSettings.setSecondRowGravity(ctx, 1);
+            ModuleSettings.setPosX(ctx, 50);
+            ModuleSettings.setPosY(ctx, 50);
             // 关闭并重新打开对话框刷新状态
             try { ((android.app.AlertDialog) ((View) v.getParent()).getParent().getParent()).dismiss(); } catch (Throwable ignored) {}
             show(ctx, onDismiss);
@@ -222,37 +213,47 @@ public class SettingsDialog {
         return b;
     }
 
-    private static int progressToGravity(int progress) {
-        if (progress < 17) return 0;
-        if (progress < 33) return 1;
-        if (progress < 50) return 2;
-        if (progress < 67) return 3;
-        if (progress < 83) return 4;
-        return 5;
-    }
+    private static View createSliderRow(Context ctx, String label, int curValue,
+            java.util.function.IntConsumer onChange) {
+        LinearLayout row = new LinearLayout(ctx);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, dp(ctx, 6), 0, dp(ctx, 6));
 
-    private static int gravityToProgress(int gravity) {
-        switch (gravity) {
-            case 0: return 8;
-            case 1: return 25;
-            case 2: return 41;
-            case 3: return 58;
-            case 4: return 75;
-            case 5: return 92;
-            default: return 50;
-        }
-    }
+        LinearLayout header = new LinearLayout(ctx);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
 
-    private static String gravityToText(int gravity) {
-        switch (gravity) {
-            case 0: return "↖ 上左";
-            case 1: return "↑ 上中";
-            case 2: return "↗ 上右";
-            case 3: return "↙ 下左";
-            case 4: return "↓ 下中";
-            case 5: return "↘ 下右";
-            default: return "居中";
-        }
+        TextView lbl = new TextView(ctx);
+        lbl.setText(label);
+        lbl.setTextSize(13);
+        lbl.setTextColor(0xCCFFFFFF);
+        lbl.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView val = new TextView(ctx);
+        val.setTextSize(12);
+        val.setTextColor(0xAAFFFFFF);
+        val.setText(curValue + "%");
+        val.setPadding(dp(ctx, 8), 0, 0, 0);
+
+        header.addView(lbl);
+        header.addView(val);
+        row.addView(header);
+
+        SeekBar bar = new SeekBar(ctx);
+        bar.setMax(100);
+        bar.setProgress(curValue);
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                if (fromUser) {
+                    onChange.accept(progress);
+                    val.setText(progress + "%");
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        });
+        row.addView(bar);
+        return row;
     }
 
     private static int dp(Context ctx, int dp) {

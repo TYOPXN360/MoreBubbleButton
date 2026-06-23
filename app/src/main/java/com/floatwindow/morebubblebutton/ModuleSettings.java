@@ -8,7 +8,8 @@ public class ModuleSettings {
     private static final String KEY_MENU_ENABLED = "menu_enabled";
     private static final String KEY_ACTION_BAR_ENABLED = "action_bar_enabled";
     private static final String KEY_POSITION_MODE = "position_mode"; // 0=跟随原按钮 1=第二行
-    private static final String KEY_SECOND_ROW_GRAVITY = "second_row_gravity"; // 0=左 1=中 2=右
+    private static final String KEY_POS_X = "pos_x"; // 0-100, 50=居中
+    private static final String KEY_POS_Y = "pos_y"; // 0-100, 50=居中
 
     private static SharedPreferences getPrefs(Context ctx) {
         return ctx.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -17,39 +18,43 @@ public class ModuleSettings {
     public static boolean isMenuEnabled(Context ctx) {
         return getPrefs(ctx).getBoolean(KEY_MENU_ENABLED, true);
     }
-
-    public static void setMenuEnabled(Context ctx, boolean enabled) {
-        getPrefs(ctx).edit().putBoolean(KEY_MENU_ENABLED, enabled).apply();
+    public static void setMenuEnabled(Context ctx, boolean v) {
+        getPrefs(ctx).edit().putBoolean(KEY_MENU_ENABLED, v).apply();
     }
 
     public static boolean isActionBarEnabled(Context ctx) {
         return getPrefs(ctx).getBoolean(KEY_ACTION_BAR_ENABLED, true);
     }
-
-    public static void setActionBarEnabled(Context ctx, boolean enabled) {
-        getPrefs(ctx).edit().putBoolean(KEY_ACTION_BAR_ENABLED, enabled).apply();
+    public static void setActionBarEnabled(Context ctx, boolean v) {
+        getPrefs(ctx).edit().putBoolean(KEY_ACTION_BAR_ENABLED, v).apply();
     }
 
-    /** 0=跟随原按钮(同一行)  1=第二行 */
+    /** 0=跟随原按钮  1=第二行 */
     public static int getPositionMode(Context ctx) {
         return getPrefs(ctx).getInt(KEY_POSITION_MODE, 0);
     }
-
-    public static void setPositionMode(Context ctx, int mode) {
-        getPrefs(ctx).edit().putInt(KEY_POSITION_MODE, mode).apply();
+    public static void setPositionMode(Context ctx, int v) {
+        getPrefs(ctx).edit().putInt(KEY_POSITION_MODE, v).apply();
     }
 
-    /** 第二行位置：0=左 1=中 2=右（仅 position_mode=1 时生效） */
-    public static int getSecondRowGravity(Context ctx) {
-        return getPrefs(ctx).getInt(KEY_SECOND_ROW_GRAVITY, 1);
+    /** X 轴位置 0-100，50=居中 */
+    public static int getPosX(Context ctx) {
+        return getPrefs(ctx).getInt(KEY_POS_X, 50);
+    }
+    public static void setPosX(Context ctx, int v) {
+        getPrefs(ctx).edit().putInt(KEY_POS_X, v).apply();
     }
 
-    public static void setSecondRowGravity(Context ctx, int gravity) {
-        getPrefs(ctx).edit().putInt(KEY_SECOND_ROW_GRAVITY, gravity).apply();
+    /** Y 轴位置 0-100，50=居中 */
+    public static int getPosY(Context ctx) {
+        return getPrefs(ctx).getInt(KEY_POS_Y, 50);
+    }
+    public static void setPosY(Context ctx, int v) {
+        getPrefs(ctx).edit().putInt(KEY_POS_Y, v).apply();
     }
 
     // 兼容旧接口
     public static int getBottomPosition(Context ctx) {
-        return getPositionMode(ctx) == 1 ? getSecondRowGravity(ctx) : 0;
+        return getPositionMode(ctx) == 1 ? 1 : 0;
     }
 }
