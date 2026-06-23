@@ -304,13 +304,6 @@ public class MoreBubbleHookModule extends XposedModule {
         btn.setId(View.generateViewId());
         btn.setTag("bubble_button");
 
-        int iconId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
-        if (iconId == 0) iconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
-        if (iconId != 0) {
-            android.graphics.drawable.Drawable icon = res.getDrawable(iconId, null);
-            if (icon != null) btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
-        }
-
         btn.setOnClickListener(v -> onBubbleButtonClick((View) btn.getParent().getParent()));
         btn.setOnLongClickListener(v -> {
             SettingsDialog.show(v.getContext(), () -> {
