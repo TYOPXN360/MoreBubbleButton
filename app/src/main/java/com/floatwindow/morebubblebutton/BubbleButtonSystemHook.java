@@ -94,6 +94,9 @@ public class BubbleButtonSystemHook extends XposedModule {
             Class<?> binderClass = mClassLoader.loadClass(
                     "com.android.systemui.statusbar.notification.collection.inflation.NotificationRowBinderImpl");
 
+            // 同时 hook canBubble 让系统认为通知支持气泡
+            hookRankingCanBubble();
+
             java.lang.reflect.Method target = null;
             for (java.lang.reflect.Method m : binderClass.getDeclaredMethods()) {
                 if (m.getParameterCount() > 0 && m.getParameterTypes()[0].getName().contains("NotificationEntry")) {
@@ -118,7 +121,8 @@ public class BubbleButtonSystemHook extends XposedModule {
                     if (clickField == null) return result;
                     clickField.setAccessible(true);
                     Object clickListener = clickField.get(row);
-                    if (clickListener != null) return result; // 已有，不需要处理
+                    // 总是替换原始监听器（原监听器无法处理无 metadata 的通知）
+                    // if (clickListener != null) return result;
 
                     // 获取 NotificationEntry
                     Object entry = getField(row, "mEntry");
@@ -187,6 +191,41 @@ public class BubbleButtonSystemHook extends XposedModule {
             Object child = getField(layout, childField);
             if (child != null) applyBubble.invoke(layout, child);
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Hook Ranking.canBubble() — 让系统认为所有非常驻通知都支持气泡
+     */
+    private void hookRankingCanBubble() {
+        try {
+            Class<?> rankingClass = mClassLoader.loadClass(
+                    "android.service.notification.NotificationListenerService$Ranking");
+            java.lang.reflect.Method canBubble = findMethod(rankingClass, "canBubble");
+            if (canBubble != null) {
+                hook(canBubble).intercept(chain -> {
+                    boolean result = (boolean) chain.proceed();
+                    if (result) return true;
+                    // 非常驻通知 → 返回 true
+                    try {
+                        Object ranking = chain.getThisObject();
+                        // 检查 notification flags
+                        java.lang.reflect.Field flagsField = findField(ranking.getClass(), "mFlags");
+                        if (flagsField != null) {
+                            flagsField.setAccessible(true);
+                            int flags = flagsField.getInt(ranking);
+                            boolean isForeground = (flags & 0x40) != 0;
+                            if (isForeground) return false;
+                        }
+                        return true;
+                    } catch (Throwable t) {
+                        return false;
+                    }
+                });
+                Log.i(TAG, "Hooked Ranking.canBubble OK");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Hook Ranking.canBubble failed: " + t.getMessage());
+        }
     }
 
     // ========== 工具方法 ==========
