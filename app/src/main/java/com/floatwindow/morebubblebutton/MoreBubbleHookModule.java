@@ -387,7 +387,7 @@ public class MoreBubbleHookModule extends XposedModule {
             // 50% → marginStart = (parentWidth - btnWidth) / 2 - 9dp（居中偏左）
             // 100% → marginStart = parentWidth - btnWidth（右对齐）
             float halfScreen = (parentWidth - btnWidth) / 2f;
-            float centerMargin = halfScreen - 9 * density;
+            float centerMargin = halfScreen - 11 * density;
             float maxMargin = parentWidth - btnWidth;
             int marginStart = (int)((posX / 100f) * maxMargin);
             // 50% 时强制居中偏左
