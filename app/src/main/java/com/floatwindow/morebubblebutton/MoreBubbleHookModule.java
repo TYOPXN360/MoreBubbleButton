@@ -361,27 +361,6 @@ public class MoreBubbleHookModule extends XposedModule {
         }
 
         btn.setOnClickListener(v -> onBubbleButtonClick((View) btn.getParent().getParent()));
-        btn.setOnLongClickListener(v -> {
-            Log.i(TAG, "Long click - opening settings");
-            SettingsDialog.show(v.getContext(), () -> {
-                Log.i(TAG, "Settings dialog dismissed, updating position");
-                Context dialogCtx = v.getContext();
-                if (!ModuleSettings.isActionBarEnabled(dialogCtx) && sSecondRow != null) {
-                    sSecondRow.setVisibility(View.GONE);
-                } else if (ModuleSettings.isActionBarEnabled(dialogCtx) && sSecondRow != null) {
-                    sSecondRow.setVisibility(View.VISIBLE);
-                }
-                // 重新应用位置设置
-                if (sSecondRow != null && sSecondRow.getLayoutParams() instanceof FrameLayout.LayoutParams) {
-                    Log.i(TAG, "Updating position: X=" + ModuleSettings.getPosX(dialogCtx)
-                            + " Y=" + ModuleSettings.getPosY(dialogCtx));
-                    updateSecondRowPosition(dialogCtx, (FrameLayout.LayoutParams) sSecondRow.getLayoutParams());
-                } else {
-                    Log.w(TAG, "sSecondRow=" + sSecondRow + " or layout params wrong");
-                }
-            });
-            return true;
-        });
         return btn;
     }
 

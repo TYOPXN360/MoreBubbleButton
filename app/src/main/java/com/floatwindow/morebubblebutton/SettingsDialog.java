@@ -66,12 +66,14 @@ public class SettingsDialog {
         sliderContainer.addView(createSliderRow(ctx, "X 轴（← 左 | 右 →）",
                 curX, (progress) -> {
                     ModuleSettings.setPosX(ctx, progress);
+                    MoreBubbleHookModule.applyPositionFromSettings(ctx);
                 }));
 
         // Y 轴
         sliderContainer.addView(createSliderRow(ctx, "Y 轴（↑ 上 | 下 ↓）",
                 curY, (progress) -> {
                     ModuleSettings.setPosY(ctx, progress);
+                    MoreBubbleHookModule.applyPositionFromSettings(ctx);
                 }));
 
         layout.addView(sliderContainer);
