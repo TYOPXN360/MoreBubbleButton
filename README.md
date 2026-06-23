@@ -9,6 +9,7 @@ Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功
 - 点击后将当前选中的应用变为消息气泡模式
 - 按钮样式、动画与原生按钮完全一致
 - 按钮过多时自动换行居中显示
+- 设置界面支持 X/Y 轴微调按钮位置（含 +/- 精确按钮）
 
 ## 要求
 
@@ -31,6 +32,21 @@ Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功
 ### 方式二：任务卡片菜单
 进入多任务界面 → 点击任务卡片左上角 app 图标 → 点击「🫧 消息气泡」
 
+### 方式三：设置
+进入启动器设置 → 点击「消息气泡」→ 调整按钮位置和开关
+
+## 设置项
+
+| 设置 | 说明 | 默认值 |
+|------|------|--------|
+| 任务卡片菜单 | 在菜单中显示消息气泡选项 | 开 |
+| 底部操作栏 | 在底部显示消息气泡按钮 | 开 |
+| 按钮位置 | 跟随原按钮 / 第二行 | 跟随原按钮 |
+| X 轴 | 水平位置（含 +/- 精调） | 50% (居中) |
+| Y 轴 | 垂直位置（含 +/- 精调） | 50% (默认间距) |
+| 重置位置 | 恢复默认 X/Y 值 | - |
+| 重启启动器 | 重启 Pixel Launcher | - |
+
 ## 技术实现
 
 基于 [libxposed API 102](https://github.com/libxposed/api)，Hook Pixel Launcher 的以下组件：
@@ -41,6 +57,7 @@ Xposed 模块，为 Pixel Launcher 最近任务界面添加「消息气泡」功
 | `OverviewActionsView` | `onClick` | 处理按钮点击 |
 | `OverviewActionsView` | `updateHiddenFlags` | 控制按钮可见性 |
 | `TaskMenuView` | `addMenuOptions` | 注入任务卡片菜单项 |
+| `SettingsActivity$LauncherSettingsFragment` | `onCreatePreferences` | 注入设置入口 |
 
 气泡触发通过 `SystemUiProxy.showAppBubble()` 调用 WMShell 的 Bubble 服务。
 
