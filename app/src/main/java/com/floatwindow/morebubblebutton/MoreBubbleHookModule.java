@@ -4,9 +4,11 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
+import android.util.AttributeSet;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -38,76 +40,33 @@ public class MoreBubbleHookModule extends XposedModule {
     @Override
     public void onPackageLoaded(PackageLoadedParam param) {
         String pkg = param.getPackageName();
-        log(Log.INFO, TAG, "onPackageLoaded: " + pkg);
-        if ("com.google.android.apps.nexuslauncher".equals(pkg)
-                || "com.android.launcher3".equals(pkg)) {
-            hookLauncher(param);
-        }
+        if (!"com.google.android.apps.nexuslauncher".equals(pkg)
+                && !"com.android.launcher3".equals(pkg)) return;
+        mLauncherClassLoader = param.getDefaultClassLoader();
+        hookLauncher(param);
     }
 
     private void hookLauncher(PackageLoadedParam param) {
-        ClassLoader cl = param.getDefaultClassLoader();
-        mLauncherClassLoader = cl;
+        ClassLoader cl = mLauncherClassLoader;
 
-        // Hook RecentsView 构造函数 — 尝试多种签名
+        // Hook OverviewActionsView.onFinishInflate
         try {
-            Class<?> clazz = cl.loadClass("com.android.quickstep.views.RecentsView");
-            boolean hooked = false;
-            for (java.lang.reflect.Constructor<?> ctor : clazz.getConstructors()) {
-                if (ctor.getParameterCount() == 1 && ctor.getParameterTypes()[0] == Context.class) {
-                    hook(ctor).intercept(chain -> {
-                        Object ret = chain.proceed();
-                        recentsViewInstance = chain.getThisObject();
-                        log(Log.INFO, TAG, "RecentsView instance captured: " + recentsViewInstance);
-                        return ret;
-                    });
-                    hooked = true;
-                    break;
-                }
-            }
-            if (!hooked) {
-                // fallback: hook the first single-arg constructor
-                for (java.lang.reflect.Constructor<?> ctor : clazz.getConstructors()) {
-                    if (ctor.getParameterCount() == 1) {
-                        hook(ctor).intercept(chain -> {
-                            Object ret = chain.proceed();
-                            recentsViewInstance = chain.getThisObject();
-                            log(Log.INFO, TAG, "RecentsView instance captured (fallback): " + recentsViewInstance);
-                            return ret;
-                        });
-                        hooked = true;
-                        break;
-                    }
-                }
-            }
-            if (!hooked) log(Log.WARN, TAG, "RecentsView constructor not found");
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to hook RecentsView", t);
-        }
-
-        // Hook OverviewActionsView.onFinishInflate — 注入按钮
-        try {
-            Class<?> clazz = cl.loadClass("com.android.quickstep.views.OverviewActionsView");
-            hook(clazz.getMethod("onFinishInflate")).intercept(chain -> {
+            hook(cl.loadClass("com.android.quickstep.views.OverviewActionsView")
+                    .getMethod("onFinishInflate")).intercept(chain -> {
                 Object ret = chain.proceed();
                 try {
-                    // 检查设置：底部操作栏按钮是否启用
                     Context ctx = ((View) chain.getThisObject()).getContext();
-                    if (ModuleSettings.isActionBarEnabled(ctx)) {
+                    if (ModuleSettings.isActionBarEnabled(ctx))
                         injectBubbleButton(chain.getThisObject(), cl);
-                    }
-                }
-                catch (Throwable t) { log(Log.ERROR, TAG, "inject failed", t); }
+                } catch (Throwable t) { log(Log.ERROR, TAG, "inject failed", t); }
                 return ret;
             });
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to hook onFinishInflate", t);
-        }
+        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook onFinishInflate: " + t.getMessage()); }
 
         // Hook OverviewActionsView.onClick
         try {
-            Class<?> clazz = cl.loadClass("com.android.quickstep.views.OverviewActionsView");
-            hook(clazz.getMethod("onClick", View.class)).intercept(chain -> {
+            hook(cl.loadClass("com.android.quickstep.views.OverviewActionsView")
+                    .getMethod("onClick", View.class)).intercept(chain -> {
                 View v = (View) chain.getArg(0);
                 if (v != null && bubbleButton != null && v.getId() == bubbleButton.getId()) {
                     onBubbleButtonClick((View) chain.getThisObject());
@@ -115,258 +74,157 @@ public class MoreBubbleHookModule extends XposedModule {
                 }
                 return chain.proceed();
             });
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to hook onClick", t);
-        }
+        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook onClick: " + t.getMessage()); }
 
-        // Hook updateHiddenFlags — 控制可见性
+        // Hook TaskMenuView.addMenuOptions
         try {
-            Class<?> clazz = cl.loadClass("com.android.quickstep.views.OverviewActionsView");
-            hook(clazz.getMethod("updateHiddenFlags", int.class, boolean.class)).intercept(chain -> {
-                Object ret = chain.proceed();
-                updateBubbleVisibility(chain.getThisObject());
-                return ret;
-            });
-        } catch (Throwable t) {
-            log(Log.WARN, TAG, "Failed to hook updateHiddenFlags: " + t.getMessage());
-        }
-
-        // Hook TaskOverlayFactory.getEnabledShortcuts — 在任务菜单中注入"消息气泡"
-        try {
-            Class<?> overlayFactoryClass = cl.loadClass("com.android.quickstep.TaskOverlayFactory");
-            Class<?> taskViewClass = cl.loadClass("com.android.quickstep.views.TaskView");
-            Class<?> taskContainerClass = cl.loadClass("com.android.quickstep.views.TaskContainer");
-            hook(overlayFactoryClass.getMethod("getEnabledShortcuts", taskViewClass, taskContainerClass))
-                    .intercept(chain -> {
-                        java.util.List result = (java.util.List) chain.proceed();
-                        try {
-                            result = injectBubbleShortcut(result, chain.getArg(0), chain.getArg(1), cl);
-                        } catch (Throwable t) {
-                            log(Log.ERROR, TAG, "injectBubbleShortcut failed", t);
-                        }
-                        return result;
-                    });
-            log(Log.INFO, TAG, "Hooked TaskOverlayFactory.getEnabledShortcuts OK");
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to hook getEnabledShortcuts: " + t.getMessage());
-        }
-
-        // Hook TaskMenuView.addMenuOptions — 在菜单中添加"消息气泡"按钮
-        try {
-            Class<?> menuViewClass = cl.loadClass("com.android.quickstep.views.TaskMenuView");
-            hook(menuViewClass.getDeclaredMethod("addMenuOptions")).intercept(chain -> {
-                chain.proceed(); // 先执行原始菜单添加
+            hook(cl.loadClass("com.android.quickstep.views.TaskMenuView")
+                    .getDeclaredMethod("addMenuOptions")).intercept(chain -> {
+                chain.proceed();
                 try {
-                    // 检查设置：菜单项是否启用
                     Context ctx = ((View) chain.getThisObject()).getContext();
-                    if (ModuleSettings.isMenuEnabled(ctx)) {
+                    if (ModuleSettings.isMenuEnabled(ctx))
                         addBubbleMenuOption(chain.getThisObject(), cl);
-                    }
-                } catch (Throwable t) {
-                    log(Log.ERROR, TAG, "addBubbleMenuOption failed", t);
-                }
+                } catch (Throwable t) { log(Log.ERROR, TAG, "addBubbleMenuOption: " + t.getMessage()); }
                 return null;
             });
-            log(Log.INFO, TAG, "Hooked TaskMenuView.addMenuOptions OK");
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to hook addMenuOptions: " + t.getMessage());
-        }
+        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook addMenuOptions: " + t.getMessage()); }
 
-        // Hook SettingsActivity.LauncherSettingsFragment.onCreatePreferences — 注入设置项
+        // Hook LauncherSettingsFragment.onCreatePreferences — 注入设置
         try {
-            Class<?> settingsFragmentClass = cl.loadClass(
-                    "com.android.launcher3.settings.SettingsActivity$LauncherSettingsFragment");
-            hook(settingsFragmentClass.getMethod("onCreatePreferences", android.os.Bundle.class, String.class))
-                    .intercept(chain -> {
-                        chain.proceed();
-                        try {
-                            injectSettingsPreferences(chain.getThisObject(), cl);
-                        } catch (Throwable t) {
-                            log(Log.ERROR, TAG, "injectSettingsPreferences failed", t);
-                        }
-                        return null;
-                    });
-            log(Log.INFO, TAG, "Hooked SettingsActivity OK");
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "Failed to hook SettingsActivity: " + t.getMessage());
-        }
+            hook(cl.loadClass("com.android.launcher3.settings.SettingsActivity$LauncherSettingsFragment")
+                    .getMethod("onCreatePreferences", Bundle.class, String.class)).intercept(chain -> {
+                chain.proceed();
+                try { injectSettingsPreferences(chain.getThisObject(), cl); }
+                catch (Throwable t) { log(Log.ERROR, TAG, "injectSettings: " + t.getMessage()); }
+                return null;
+            });
+        } catch (Throwable t) { log(Log.ERROR, TAG, "Hook SettingsActivity: " + t.getMessage()); }
     }
 
-    /**
-     * 注入设置项到主屏幕设置界面
-     */
-    @SuppressLint("UseSwitchCompatOrMaterialCode")
+    // ==================== 设置注入（参考 PLEnhanced LauncherSettings.kt） ====================
+
     private void injectSettingsPreferences(Object fragment, ClassLoader cl) {
         try {
-            // 获取 PreferenceScreen
-            Method getPreferenceScreen = findMethod(fragment.getClass(), "getPreferenceScreen");
-            Object preferenceScreen = getPreferenceScreen.invoke(fragment);
-            if (preferenceScreen == null) {
-                log(Log.WARN, TAG, "PreferenceScreen is null");
-                return;
+            Object screen = findMethod(fragment.getClass(), "getPreferenceScreen").invoke(fragment);
+            if (screen == null) return;
+            Context ctx = (Context) findMethod(fragment.getClass(), "requireContext").invoke(fragment);
+            Class<?> prefCls = cl.loadClass("androidx.preference.Preference");
+
+            // 查找 OnPreferenceClickListener 接口
+            Class<?> clickCls = null;
+            String clickField = null;
+            for (java.lang.reflect.Method m : prefCls.getMethods()) {
+                if (m.getName().equals("setOnPreferenceClickListener") && m.getParameterCount() == 1) {
+                    clickCls = m.getParameterTypes()[0]; break;
+                }
+            }
+            if (clickCls == null) {
+                for (java.lang.reflect.Field f : prefCls.getDeclaredFields()) {
+                    if (f.getName().contains("OnClickListener") || f.getName().contains("clickListener")) {
+                        clickCls = f.getType(); clickField = f.getName(); break;
+                    }
+                }
             }
 
-            // 获取 Context — 通过反射调用 requireContext()
-            Method requireContext = findMethod(fragment.getClass(), "requireContext");
-            Context ctx = (Context) requireContext.invoke(fragment);
-            Class<?> switchPrefClass = cl.loadClass("androidx.preference.SwitchPreference");
-            Class<?> prefClass = cl.loadClass("androidx.preference.Preference");
-            Class<?> prefScreenClass = cl.loadClass("androidx.preference.PreferenceScreen");
+            // 1. 分类标题
+            Object cat = newPref(prefCls, ctx, "more_bubble_category", "消息气泡设置", null);
+            if (cat != null) addPref(screen, cat, cl);
 
-            // 创建分类标题
-            Object category = createPreference(ctx, prefClass, "more_bubble_category",
-                    "消息气泡设置", null, -1);
-            if (category != null) {
-                addPreference(preferenceScreen, category, prefScreenClass);
-            }
-
-            // 开关1: 任务卡片菜单
-            Object menuSwitch = createSwitchPreference(ctx, switchPrefClass,
-                    "pref_bubble_menu_enabled", "任务卡片菜单",
+            // 2. 任务卡片菜单开关
+            Object menuSw = newSwitch(cl, ctx, "pref_bubble_menu_enabled", "任务卡片菜单",
                     "在多任务界面点击 app 图标弹出的菜单中显示「消息气泡」",
                     ModuleSettings.isMenuEnabled(ctx));
-            if (menuSwitch != null) {
-                addPreference(preferenceScreen, menuSwitch, prefScreenClass);
-            }
+            if (menuSw != null) addPref(screen, menuSw, cl);
 
-            // 开关2: 底部操作栏
-            Object actionBarSwitch = createSwitchPreference(ctx, switchPrefClass,
-                    "pref_bubble_actionbar_enabled", "底部操作栏",
+            // 3. 底部操作栏开关
+            Object barSw = newSwitch(cl, ctx, "pref_bubble_actionbar_enabled", "底部操作栏",
                     "在多任务界面底部显示「消息气泡」按钮",
                     ModuleSettings.isActionBarEnabled(ctx));
-            if (actionBarSwitch != null) {
-                addPreference(preferenceScreen, actionBarSwitch, prefScreenClass);
-            }
+            if (barSw != null) addPref(screen, barSw, cl);
 
-            // 位置选择
-            Object positionPref = createPreference(ctx, prefClass,
-                    "pref_bubble_position", "底部按钮位置",
-                    get当前位置文本(ctx), -1);
-            if (positionPref != null) {
-                // 设置点击监听
-                Method setOnPreferenceClickListener = findMethod(prefClass,
-                        "setOnPreferenceClickListener",
-                        cl.loadClass("androidx.preference.Preference$OnPreferenceClickListener"));
-                if (setOnPreferenceClickListener != null) {
-                    // 创建点击监听器
-                    Object listener = java.lang.reflect.Proxy.newProxyInstance(
-                            cl.loadClass("androidx.preference.Preference$OnPreferenceClickListener").getClassLoader(),
-                            new Class[]{cl.loadClass("androidx.preference.Preference$OnPreferenceClickListener")},
-                            (proxy, method, args) -> {
-                                if ("onPreferenceClick".equals(method.getName())) {
-                                    showPositionDialog(ctx, positionPref, cl);
-                                    return true;
-                                }
-                                return false;
-                            });
-                    setOnPreferenceClickListener.invoke(positionPref, listener);
+            // 4. 位置选择
+            Object posPref = newPref(prefCls, ctx, "pref_bubble_position", "底部按钮位置", getPosText(ctx));
+            if (posPref != null && clickCls != null) {
+                Object listener = java.lang.reflect.Proxy.newProxyInstance(
+                        clickCls.getClassLoader(), new Class[]{clickCls},
+                        (p, m, a) -> { if ("onPreferenceClick".equals(m.getName())) {
+                            showPosDialog(ctx, posPref); return true; } return false; });
+                if (clickField != null) {
+                    java.lang.reflect.Field f = prefCls.getDeclaredField(clickField);
+                    f.setAccessible(true); f.set(posPref, listener);
+                } else {
+                    prefCls.getMethod("setOnPreferenceClickListener", clickCls).invoke(posPref, listener);
                 }
-                addPreference(preferenceScreen, positionPref, prefScreenClass);
             }
+            if (posPref != null) addPref(screen, posPref, cl);
 
-            log(Log.INFO, TAG, "Settings preferences injected");
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "injectSettingsPreferences failed: " + t.getMessage());
-        }
+            log(Log.INFO, TAG, "Settings injected");
+        } catch (Throwable t) { log(Log.ERROR, TAG, "injectSettings: " + t.getMessage()); }
     }
 
-    private Object createPreference(Context ctx, Class<?> prefClass, String key,
-            String title, String summary, int order) {
+    private Object newPref(Class<?> cls, Context ctx, String key, String title, String summary) {
         try {
-            // Preference(Context, AttributeSet, int, int) — 使用 null 和默认值
-            java.lang.reflect.Constructor<?> ctor = prefClass.getDeclaredConstructor(
-                    Context.class, android.util.AttributeSet.class, int.class, int.class);
-            ctor.setAccessible(true);
-            Object pref = ctor.newInstance(ctx, null, 0, 0);
-            // 设置 key
-            Method setKey = findMethod(prefClass, "setKey", String.class);
-            setKey.invoke(pref, key);
-            // 设置 title
-            Method setTitle = findMethod(prefClass, "setTitle", CharSequence.class);
-            setTitle.invoke(pref, title);
-            // 设置 summary
-            if (summary != null) {
-                Method setSummary = findMethod(prefClass, "setSummary", CharSequence.class);
-                setSummary.invoke(pref, summary);
-            }
-            // 设置 order
-            if (order >= 0) {
-                Method setOrder = findMethod(prefClass, "setOrder", int.class);
-                setOrder.invoke(pref, order);
-            }
-            return pref;
-        } catch (Throwable t) {
-            log(Log.WARN, TAG, "createPreference failed: " + t.getMessage());
-            return null;
-        }
+            Object p = cls.getDeclaredConstructor(Context.class, AttributeSet.class, int.class, int.class)
+                    .newInstance(ctx, null, android.R.attr.preferenceStyle, 0);
+            setKey(p, key, cls);
+            callM(p, "setTitle", title);
+            if (summary != null) callM(p, "setSummary", summary);
+            return p;
+        } catch (Throwable t) { log(Log.WARN, TAG, "newPref: " + t.getMessage()); return null; }
     }
 
-    private Object createSwitchPreference(Context ctx, Class<?> switchPrefClass,
-            String key, String title, String summary, boolean defaultValue) {
+    private Object newSwitch(ClassLoader cl, Context ctx, String key, String title, String summary, boolean def) {
         try {
-            java.lang.reflect.Constructor<?> ctor = switchPrefClass.getDeclaredConstructor(
-                    Context.class, android.util.AttributeSet.class, int.class, int.class);
-            ctor.setAccessible(true);
-            Object pref = ctor.newInstance(ctx, null, 0, 0);
-            Method setKey = findMethod(switchPrefClass, "setKey", String.class);
-            setKey.invoke(pref, key);
-            Method setTitle = findMethod(switchPrefClass, "setTitle", CharSequence.class);
-            setTitle.invoke(pref, title);
-            Method setSummary = findMethod(switchPrefClass, "setSummary", CharSequence.class);
-            setSummary.invoke(pref, summary);
-            Method setDefaultValue = findMethod(switchPrefClass, "setDefaultValue", Object.class);
-            setDefaultValue.invoke(pref, defaultValue);
-            return pref;
-        } catch (Throwable t) {
-            log(Log.WARN, TAG, "createSwitchPreference failed: " + t.getMessage());
-            return null;
-        }
+            // 使用 Preference 基类构造函数（已验证可用）
+            Class<?> prefCls = cl.loadClass("androidx.preference.Preference");
+            Object p = prefCls.getDeclaredConstructor(Context.class, AttributeSet.class, int.class, int.class)
+                    .newInstance(ctx, null, android.R.attr.preferenceStyle, 0);
+            setKey(p, key, prefCls);
+            callM(p, "setTitle", title);
+            callM(p, "setSummary", summary);
+            // 设置 SwitchPreference 的 persistent 属性
+            try { prefCls.getMethod("setPersistent", boolean.class).invoke(p, true); } catch (Throwable ignored) {}
+            // 设置默认值
+            try { prefCls.getMethod("setDefaultValue", Object.class).invoke(p, def); } catch (Throwable ignored) {}
+            return p;
+        } catch (Throwable t) { log(Log.WARN, TAG, "newSwitch: " + t.getMessage()); return null; }
     }
 
-    private void addPreference(Object preferenceScreen, Object preference, Class<?> prefScreenClass) {
-        try {
-            Method addPreference = findMethod(prefScreenClass, "addPreference", 
-                    Class.forName("androidx.preference.Preference"));
-            addPreference.invoke(preferenceScreen, preference);
-        } catch (Throwable t) {
-            log(Log.WARN, TAG, "addPreference failed: " + t.getMessage());
-        }
+    private void setKey(Object p, String key, Class<?> cls) {
+        try { cls.getMethod("setKey", String.class).invoke(p, key); }
+        catch (Throwable t) { try { java.lang.reflect.Field f = cls.getDeclaredField("mKey");
+            f.setAccessible(true); f.set(p, key); } catch (Throwable ignored) {} }
     }
 
-    private String get当前位置文本(Context ctx) {
-        int pos = ModuleSettings.getBottomPosition(ctx);
-        switch (pos) {
-            case 0: return "左侧";
-            case 2: return "右侧";
-            default: return "居中";
-        }
+    private void callM(Object p, String m, String arg) {
+        try { p.getClass().getMethod(m, CharSequence.class).invoke(p, arg); }
+        catch (Throwable ignored) {}
     }
 
-    private void showPositionDialog(Context ctx, Object positionPref, ClassLoader cl) {
-        try {
-            String[] positions = {"左侧", "居中", "右侧"};
-            int current = ModuleSettings.getBottomPosition(ctx);
-
-            new android.app.AlertDialog.Builder(ctx)
-                    .setTitle("底部按钮位置")
-                    .setSingleChoiceItems(positions, current, (dialog, which) -> {
-                        ModuleSettings.setBottomPosition(ctx, which);
-                        // 更新 summary
-                        try {
-                            Method setSummary = findMethod(
-                                    Class.forName("androidx.preference.Preference"),
-                                    "setSummary", CharSequence.class);
-                            setSummary.invoke(positionPref, get当前位置文本(ctx));
-                        } catch (Throwable ignored) {}
-                        dialog.dismiss();
-                    })
-                    .show();
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "showPositionDialog failed: " + t.getMessage());
-        }
+    private void addPref(Object screen, Object pref, ClassLoader cl) {
+        try { cl.loadClass("androidx.preference.PreferenceScreen")
+                .getMethod("addPreference", cl.loadClass("androidx.preference.Preference"))
+                .invoke(screen, pref); }
+        catch (Throwable t) { log(Log.WARN, TAG, "addPref: " + t.getMessage()); }
     }
 
-    // ==================== 按钮注入 ====================
+    private String getPosText(Context ctx) {
+        int p = ModuleSettings.getBottomPosition(ctx);
+        return p == 0 ? "左侧" : p == 2 ? "右侧" : "居中";
+    }
+
+    private void showPosDialog(Context ctx, Object posPref) {
+        String[] items = {"左侧", "居中", "右侧"};
+        new android.app.AlertDialog.Builder(ctx).setTitle("底部按钮位置")
+                .setSingleChoiceItems(items, ModuleSettings.getBottomPosition(ctx), (d, w) -> {
+                    ModuleSettings.setBottomPosition(ctx, w);
+                    callM(posPref, "setSummary", getPosText(ctx));
+                    d.dismiss();
+                }).show();
+    }
+
+    // ==================== 操作栏按钮 ====================
 
     @SuppressLint("DiscouragedApi")
     private void injectBubbleButton(Object actionsView, ClassLoader cl) {
@@ -374,44 +232,24 @@ public class MoreBubbleHookModule extends XposedModule {
         android.content.res.Resources res = ctx.getResources();
         String pkg = ctx.getPackageName();
 
-        // 获取 action_buttons
         LinearLayout mActionButtons = null;
         int abId = res.getIdentifier("action_buttons", "id", pkg);
         if (abId != 0) mActionButtons = ((View) actionsView).findViewById(abId);
-        if (mActionButtons == null) {
-            log(Log.ERROR, TAG, "action_buttons not found!");
-            return;
-        }
-
-        // 统计可见的原始按钮（排除 ClearAllButton 和气泡按钮）
-        int visibleButtonCount = 0;
-        for (int i = 0; i < mActionButtons.getChildCount(); i++) {
-            View child = mActionButtons.getChildAt(i);
-            if (child.getVisibility() != View.VISIBLE || !(child instanceof Button)) continue;
-            if (child.getTag() != null && "bubble_button".equals(child.getTag())) continue;
-            if (isClearAllButton(child)) continue;
-            visibleButtonCount++;
-        }
+        if (mActionButtons == null) return;
 
         Button btn = createBubbleButton(ctx, res, pkg);
-        ViewGroup actionsParent = (ViewGroup) actionsView;
-
-        // 始终将消息气泡按钮放到第二行，避免与原按钮重叠
-        ensureSecondRow(actionsParent, btn, res, pkg);
+        ensureSecondRow((ViewGroup) actionsView, btn, res, pkg);
     }
 
     private boolean isClearAllButton(View child) {
-        try {
-            Class<?> clazz = mLauncherClassLoader.loadClass("com.android.quickstep.views.ClearAllButton");
-            return clazz.isInstance(child);
-        } catch (Throwable t) { return false; }
+        try { return mLauncherClassLoader.loadClass("com.android.quickstep.views.ClearAllButton").isInstance(child); }
+        catch (Throwable t) { return false; }
     }
 
     @SuppressLint("DiscouragedApi")
     private Button createBubbleButton(Context ctx, android.content.res.Resources res, String pkg) {
         int styleId = res.getIdentifier("OverviewActionButton.Blur", "style", pkg);
         if (styleId == 0) styleId = res.getIdentifier("OverviewActionButton", "style", pkg);
-
         Button btn = (styleId != 0) ? new Button(ctx, null, 0, styleId) : new Button(ctx);
         btn.setText("消息气泡");
         btn.setContentDescription("消息气泡");
@@ -424,17 +262,14 @@ public class MoreBubbleHookModule extends XposedModule {
             android.graphics.drawable.Drawable icon = res.getDrawable(iconId, null);
             if (icon != null) btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
         }
+
         btn.setOnClickListener(v -> onBubbleButtonClick((View) btn.getParent().getParent()));
-        // 长按打开设置
         btn.setOnLongClickListener(v -> {
-            Context settingsCtx = v.getContext();
-            SettingsDialog.show(settingsCtx, () -> {
-                // 设置关闭后，隐藏/显示按钮
-                if (!ModuleSettings.isActionBarEnabled(settingsCtx) && secondRow != null) {
+            SettingsDialog.show(v.getContext(), () -> {
+                if (!ModuleSettings.isActionBarEnabled(v.getContext()) && secondRow != null)
                     secondRow.setVisibility(View.GONE);
-                } else if (ModuleSettings.isActionBarEnabled(settingsCtx) && secondRow != null) {
+                else if (ModuleSettings.isActionBarEnabled(v.getContext()) && secondRow != null)
                     secondRow.setVisibility(View.VISIBLE);
-                }
             });
             return true;
         });
@@ -445,20 +280,20 @@ public class MoreBubbleHookModule extends XposedModule {
     private void ensureSecondRow(ViewGroup actionsParent, Button btn,
             android.content.res.Resources res, String pkg) {
         Context ctx = actionsParent.getContext();
-        // 已有第二行且已有气泡按钮
+
         if (secondRow != null && secondRow.getParent() == actionsParent) {
             for (int i = 0; i < ((ViewGroup) secondRow).getChildCount(); i++) {
-                View child = ((ViewGroup) secondRow).getChildAt(i);
-                if (child.getTag() != null && "bubble_button".equals(child.getTag())) {
-                    bubbleButton = child;
+                if (((ViewGroup) secondRow).getChildAt(i).getTag() != null
+                        && "bubble_button".equals(((ViewGroup) secondRow).getChildAt(i).getTag().toString())) {
+                    bubbleButton = ((ViewGroup) secondRow).getChildAt(i);
                     return;
                 }
             }
-            ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
+            ViewGroup.MarginLayoutParams mlp = new ViewGroup.MarginLayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            int spacingId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
-            if (spacingId != 0) btnMlp.setMarginStart(res.getDimensionPixelSize(spacingId));
-            btn.setLayoutParams(btnMlp);
+            int spId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
+            if (spId != 0) mlp.setMarginStart(res.getDimensionPixelSize(spId));
+            btn.setLayoutParams(mlp);
             ((ViewGroup) secondRow).addView(btn);
             bubbleButton = btn;
             return;
@@ -468,67 +303,55 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.setTag("bubble_second_row");
         newSecondRow.setOrientation(LinearLayout.HORIZONTAL);
 
-        // 应用位置设置
-        int position = ModuleSettings.getBottomPosition(ctx);
-        switch (position) {
-            case 0: newSecondRow.setGravity(android.view.Gravity.START); break;
-            case 2: newSecondRow.setGravity(android.view.Gravity.END); break;
-            default: newSecondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL); break;
-        }
+        int pos = ModuleSettings.getBottomPosition(ctx);
+        newSecondRow.setGravity(pos == 0 ? android.view.Gravity.START
+                : pos == 2 ? android.view.Gravity.END : android.view.Gravity.CENTER_HORIZONTAL);
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        int spacingId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
-        if (spacingId != 0) btnMlp.setMarginStart(res.getDimensionPixelSize(spacingId));
+        int spId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
+        if (spId != 0) btnMlp.setMarginStart(res.getDimensionPixelSize(spId));
         btn.setLayoutParams(btnMlp);
         newSecondRow.addView(btn);
         bubbleButton = btn;
 
         int insertIndex = 0;
         int abId = res.getIdentifier("action_buttons", "id", pkg);
-        View actionButtonsView = actionsParent.findViewById(abId);
-        if (actionButtonsView != null) insertIndex = actionsParent.indexOfChild(actionButtonsView) + 1;
+        View abv = actionsParent.findViewById(abId);
+        if (abv != null) insertIndex = actionsParent.indexOfChild(abv) + 1;
 
         FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
         secondRow = newSecondRow;
 
-        // 定位到 action_buttons 下方 + 同步 alpha 动画
         newSecondRow.post(() -> {
-            if (actionButtonsView != null) {
-                int[] loc = new int[2], parentLoc = new int[2];
-                actionButtonsView.getLocationOnScreen(loc);
-                actionsParent.getLocationOnScreen(parentLoc);
-                int relativeBottom = loc[1] - parentLoc[1] + actionButtonsView.getHeight();
-                int topMarginId = res.getIdentifier("overview_actions_top_margin", "dimen", pkg);
-                int extraSpacing = topMarginId != 0 ? res.getDimensionPixelSize(topMarginId) : 24;
+            if (abv != null) {
+                int[] loc = new int[2], pLoc = new int[2];
+                abv.getLocationOnScreen(loc);
+                actionsParent.getLocationOnScreen(pLoc);
+                int bottom = loc[1] - pLoc[1] + abv.getHeight();
+                int topId = res.getIdentifier("overview_actions_top_margin", "dimen", pkg);
+                int spacing = topId != 0 ? res.getDimensionPixelSize(topId) : 24;
                 FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
-                lp.topMargin = relativeBottom + extraSpacing;
+                lp.topMargin = bottom + spacing;
                 newSecondRow.setLayoutParams(lp);
             }
-            // 每帧同步 alpha
             actionsParent.getViewTreeObserver().addOnPreDrawListener(
                     new ViewTreeObserver.OnPreDrawListener() {
                         @Override public boolean onPreDraw() {
-                            if (secondRow != null && actionButtonsView != null)
-                                secondRow.setAlpha(actionButtonsView.getAlpha());
+                            if (secondRow != null && abv != null)
+                                secondRow.setAlpha(abv.getAlpha());
                             return true;
                         }
                     });
         });
     }
 
-    private void updateBubbleVisibility(Object actionsView) {
-        // 仅日志，实际同步由 OnPreDrawListener 完成
-    }
+    private void updateBubbleVisibility(Object av) {}
 
-    // ==================== 任务菜单气泡选项 ====================
+    // ==================== 菜单项注入 ====================
 
-    /**
-     * 在 TaskMenuView 中添加"消息气泡"菜单选项
-     */
     @SuppressLint("DiscouragedApi")
     private void addBubbleMenuOption(Object menuView, ClassLoader cl) {
         try {
@@ -536,390 +359,161 @@ public class MoreBubbleHookModule extends XposedModule {
             android.content.res.Resources res = ctx.getResources();
             String pkg = ctx.getPackageName();
 
-            // 获取 optionLayout
-            java.lang.reflect.Method getOptionLayout = findMethod(menuView.getClass(), "getOptionLayout");
-            if (getOptionLayout == null) { log(Log.WARN, TAG, "getOptionLayout not found"); return; }
-            ViewGroup optionLayout = (ViewGroup) getOptionLayout.invoke(menuView);
-            if (optionLayout == null) { log(Log.WARN, TAG, "optionLayout is null"); return; }
+            ViewGroup optionLayout = (ViewGroup) findMethod(menuView.getClass(), "getOptionLayout").invoke(menuView);
+            Object taskContainer = findMethod(menuView.getClass(), "getTaskContainer").invoke(menuView);
+            if (optionLayout == null || taskContainer == null) return;
 
-            // 获取 TaskContainer
-            java.lang.reflect.Method getTaskContainer = findMethod(menuView.getClass(), "getTaskContainer");
-            Object taskContainer = getTaskContainer != null ? getTaskContainer.invoke(menuView) : null;
-            if (taskContainer == null) { log(Log.WARN, TAG, "taskContainer is null"); return; }
-
-            // inflate 菜单项布局 — 与原菜单完全一致
-            int layoutId = res.getIdentifier("task_view_menu_option", "layout", pkg);
-            if (layoutId == 0) { log(Log.WARN, TAG, "layout not found"); return; }
+            // 捕获 RecentsView
+            try {
+                Object tv = findMethod(menuView.getClass(), "getTaskView").invoke(menuView);
+                if (tv != null) {
+                    recentsViewInstance = findMethod(tv.getClass(), "getRecentsView").invoke(tv);
+                    log(Log.INFO, TAG, "Captured RecentsView: " + recentsViewInstance);
+                }
+            } catch (Throwable ignored) {}
 
             ViewGroup menuItem = (ViewGroup) android.view.LayoutInflater.from(ctx)
-                    .inflate(layoutId, optionLayout, false);
+                    .inflate(res.getIdentifier("task_view_menu_option", "layout", pkg), optionLayout, false);
 
-            // 设置背景 — 与原菜单一致（带 hover/pressed 高亮）
             int bgId = res.getIdentifier("app_chip_menu_item_bg", "drawable", pkg);
-            if (bgId != 0) {
-                menuItem.setBackground(res.getDrawable(bgId, ctx.getTheme()));
+            if (bgId != 0) menuItem.setBackground(res.getDrawable(bgId, ctx.getTheme()));
+
+            int iconId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
+            if (iconId == 0) iconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
+            View iconView = menuItem.findViewById(res.getIdentifier("icon", "id", pkg));
+            if (iconView != null && iconId != 0) {
+                android.graphics.drawable.Drawable icon = res.getDrawable(iconId, ctx.getTheme());
+                int tintId = res.getIdentifier("materialColorOnSurface", "color", pkg);
+                if (tintId != 0) icon.setTint(res.getColor(tintId, ctx.getTheme()));
+                iconView.setBackground(icon);
             }
 
-            // 设置图标 — icon 是 View，用 setBackground
-            int iconId = res.getIdentifier("icon", "id", pkg);
-            View iconView = iconId != 0 ? menuItem.findViewById(iconId) : null;
-            if (iconView != null) {
-                int bubbleIconId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
-                if (bubbleIconId == 0) bubbleIconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
-                if (bubbleIconId != 0) {
-                    android.graphics.drawable.Drawable icon = res.getDrawable(bubbleIconId, ctx.getTheme());
-                    int tintColorId = res.getIdentifier("materialColorOnSurface", "color", pkg);
-                    if (tintColorId != 0) icon.setTint(res.getColor(tintColorId, ctx.getTheme()));
-                    iconView.setBackground(icon);
-                }
-            }
+            View tv = menuItem.findViewById(res.getIdentifier("text", "id", pkg));
+            if (tv instanceof android.widget.TextView)
+                ((android.widget.TextView) tv).setText("消息气泡");
 
-            // 设置文字
-            int textId = res.getIdentifier("text", "id", pkg);
-            View textView = textId != 0 ? menuItem.findViewById(textId) : null;
-            if (textView instanceof android.widget.TextView) {
-                ((android.widget.TextView) textView).setText("消息气泡");
-            }
-
-            // 设置布局参数 — 与原菜单一致：width=MATCH_PARENT, height=WRAP_CONTENT
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) menuItem.getLayoutParams();
             lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
             lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
             menuItem.setLayoutParams(lp);
 
-            // 点击事件 — 触发气泡 + 关闭菜单 + 退出多任务
             menuItem.setOnClickListener(v -> {
-                log(Log.INFO, TAG, "Bubble menu option clicked!");
                 try {
-                    // 1. 关闭菜单
-                    java.lang.reflect.Method closeMethod = findMethod(
-                            menuView.getClass(), "close", boolean.class);
-                    if (closeMethod != null) {
-                        closeMethod.invoke(menuView, true);
-                        log(Log.INFO, TAG, "Menu closed");
-                    }
-
-                    // 2. 获取任务并触发气泡
                     Object task = invokeGetter(taskContainer, "getTask");
                     if (task == null) return;
-                    Object taskKey = getField(task, "key");
-                    Intent taskIntent = (Intent) getField(taskKey, "baseIntent");
-                    int userId = getField(taskKey, "userId") != null ? (int) getField(taskKey, "userId") : 0;
-                    if (taskIntent != null) {
-                        bubbleCurrentTask(ctx, taskIntent, userId);
+                    Object key = getField(task, "key");
+                    Intent intent = (Intent) getField(key, "baseIntent");
+                    int userId = getField(key, "userId") != null ? (int) getField(key, "userId") : 0;
+                    if (intent != null) {
+                        findMethod(menuView.getClass(), "close", boolean.class).invoke(menuView, true);
+                        bubbleCurrentTask(ctx, intent, userId);
+                        new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> dismissOverview(ctx), 200);
                     }
-
-                    // 3. 退出多任务
-                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        dismissOverview(ctx);
-                    }, 200);
-
-                } catch (Throwable t) { log(Log.ERROR, TAG, "click failed: " + t.getMessage()); }
+                } catch (Throwable t) { log(Log.ERROR, TAG, "menu click: " + t.getMessage()); }
             });
 
-            // 在注入时捕获 RecentsView 实例
-            try {
-                java.lang.reflect.Method getTaskViewM = findMethod(menuView.getClass(), "getTaskView");
-                Object tv = getTaskViewM != null ? getTaskViewM.invoke(menuView) : null;
-                if (tv != null) {
-                    java.lang.reflect.Method getRecentsViewM = findMethod(tv.getClass(), "getRecentsView");
-                    if (getRecentsViewM != null) {
-                        recentsViewInstance = getRecentsViewM.invoke(tv);
-                        log(Log.INFO, TAG, "Captured RecentsView: " + recentsViewInstance);
-                    }
-                }
-            } catch (Throwable t) {
-                log(Log.WARN, TAG, "Capture RecentsView failed: " + t.getMessage());
-            }
-
             optionLayout.addView(menuItem);
-            log(Log.INFO, TAG, "Bubble menu added: width=" + lp.width + " height=" + lp.height);
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "addBubbleMenuOption failed: " + t.getMessage());
-        }
+        } catch (Throwable t) { log(Log.ERROR, TAG, "addBubbleMenuOption: " + t.getMessage()); }
     }
 
-    private static Object invokeGetter(Object obj, String methodName) {
-        try {
-            Method m = findMethod(obj.getClass(), methodName);
-            return m != null ? m.invoke(obj) : null;
-        } catch (Throwable t) { return null; }
-    }
+    // ==================== 气泡触发 ====================
 
-    /**
-     * Hook TaskOverlayFactory.getEnabledShortcuts 的占位方法
-     * 实际注入在 addBubbleMenuOption 中完成
-     */
-    private java.util.List<?> injectBubbleShortcut(java.util.List<?> shortcuts, Object taskView, Object taskContainer, ClassLoader cl) {
-        return shortcuts;
-    }
-
-    // ==================== 气泡触发逻辑 ====================
-
-    /**
-     * 点击"消息气泡" → 将当前选中的任务变为消息气泡
-     */
     private void onBubbleButtonClick(View actionsView) {
         Context ctx = actionsView.getContext();
-        log(Log.INFO, TAG, "Bubble button clicked!");
-
-        // 从 View 层级向上查找 RecentsView
-        Object recentsView = recentsViewInstance;
-        if (recentsView == null) {
-            recentsView = findRecentsViewFromHierarchy(actionsView);
-        }
-
-        if (recentsView == null) {
-            log(Log.WARN, TAG, "RecentsView not found");
-            showToast(ctx, "无法获取最近任务视图");
-            return;
-        }
+        Object rv = recentsViewInstance;
+        if (rv == null) rv = findRecentsViewFromHierarchy(actionsView);
+        if (rv == null) { log(Log.WARN, TAG, "RecentsView not found"); return; }
 
         try {
-            Method getCurrentPageTaskView = findMethod(recentsView.getClass(), "getCurrentPageTaskView");
-            if (getCurrentPageTaskView == null) { log(Log.WARN, TAG, "getCurrentPageTaskView not found"); return; }
-            Object taskView = getCurrentPageTaskView.invoke(recentsView);
-            if (taskView == null) { log(Log.WARN, TAG, "No current task view"); showToast(ctx, "没有选中的任务"); return; }
+            Object tv = findMethod(rv.getClass(), "getCurrentPageTaskView").invoke(rv);
+            if (tv == null) return;
+            List<?> tc = (List<?>) findMethod(tv.getClass(), "getTaskContainers").invoke(tv);
+            if (tc == null || tc.isEmpty()) return;
 
-            Method getTaskContainers = findMethod(taskView.getClass(), "getTaskContainers");
-            if (getTaskContainers == null) { log(Log.WARN, TAG, "getTaskContainers not found"); return; }
-            List<?> taskContainers = (List<?>) getTaskContainers.invoke(taskView);
-            if (taskContainers == null || taskContainers.isEmpty()) { log(Log.WARN, TAG, "No task containers"); return; }
+            Object task = findMethod(tc.get(0).getClass(), "getTask").invoke(tc.get(0));
+            Object key = getField(task, "key");
+            Intent intent = (Intent) getField(key, "baseIntent");
+            int userId = getField(key, "userId") != null ? (int) getField(key, "userId") : 0;
+            if (intent == null) return;
 
-            Object taskContainer = taskContainers.get(0);
-            Method getTask = findMethod(taskContainer.getClass(), "getTask");
-            if (getTask == null) { log(Log.WARN, TAG, "getTask not found"); return; }
-            Object task = getTask.invoke(taskContainer);
-            if (task == null) { log(Log.WARN, TAG, "Task is null"); return; }
-
-            Object taskKey = getField(task, "key");
-            Intent taskIntent = (Intent) getField(taskKey, "baseIntent");
-            int userId = getField(taskKey, "userId") != null ? (int) getField(taskKey, "userId") : 0;
-
-            log(Log.INFO, TAG, "Current task: intent=" + taskIntent + " userId=" + userId);
-            if (taskIntent == null) { showToast(ctx, "无法获取任务信息"); return; }
-
-            bubbleCurrentTask(ctx, taskIntent, userId);
-
-            // 退出多任务界面
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                dismissOverview(ctx);
-            }, 200);
-
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "onBubbleButtonClick failed: " + t.getMessage());
-            t.printStackTrace();
-        }
+            bubbleCurrentTask(ctx, intent, userId);
+            new android.os.Handler(Looper.getMainLooper()).postDelayed(() -> dismissOverview(ctx), 200);
+        } catch (Throwable t) { log(Log.ERROR, TAG, "onBubbleButtonClick: " + t.getMessage()); }
     }
 
-    /**
-     * 从 View 层级向上查找 RecentsView 实例
-     */
-    private Object findRecentsViewFromHierarchy(View view) {
-        try {
-            Class<?> recentsViewClass = mLauncherClassLoader.loadClass("com.android.quickstep.views.RecentsView");
-            View current = view;
-            while (current != null) {
-                if (recentsViewClass.isInstance(current)) {
-                    log(Log.INFO, TAG, "Found RecentsView from hierarchy: " + current);
-                    recentsViewInstance = current;
-                    return current;
-                }
-                if (current.getParent() instanceof View) {
-                    current = (View) current.getParent();
-                } else {
-                    break;
-                }
-            }
-            // 尝试从 DecorView 的 rootView 查找
-            View rootView = view.getRootView();
-            if (rootView != null) {
-                Object result = findRecentsViewInTree(rootView, recentsViewClass);
-                if (result != null) {
-                    recentsViewInstance = result;
-                    return result;
-                }
-            }
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "findRecentsViewFromHierarchy failed: " + t.getMessage());
-        }
-        return null;
-    }
-
-    /**
-     * 递归搜索 View 树查找 RecentsView
-     */
-    private Object findRecentsViewInTree(View view, Class<?> targetClass) {
-        if (targetClass.isInstance(view)) return view;
-        if (view instanceof ViewGroup) {
-            ViewGroup vg = (ViewGroup) view;
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                Object result = findRecentsViewInTree(vg.getChildAt(i), targetClass);
-                if (result != null) return result;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * 通过 SystemUiProxy.showAppBubble 将任务变为气泡
-     */
     private boolean bubbleCurrentTask(Context ctx, Intent taskIntent, int userId) {
         try {
-            // 获取 SystemUiProxy
-            Class<?> proxyClass = mLauncherClassLoader.loadClass("com.android.quickstep.SystemUiProxy");
-            Object daggerSingleton = proxyClass.getField("INSTANCE").get(null);
-            Object systemUiProxy = daggerSingleton.getClass().getMethod("get", Context.class)
-                    .invoke(daggerSingleton, ctx.getApplicationContext());
-            if (systemUiProxy == null) { log(Log.WARN, TAG, "SystemUiProxy is null"); return false; }
+            Class<?> proxyCls = mLauncherClassLoader.loadClass("com.android.quickstep.SystemUiProxy");
+            Object ds = proxyCls.getField("INSTANCE").get(null);
+            Object proxy = ds.getClass().getMethod("get", Context.class).invoke(ds, ctx.getApplicationContext());
+            if (proxy == null) return false;
 
-            // Intent — 确保有 package
-            Intent bubbleIntent = new Intent(taskIntent);
-            if (bubbleIntent.getPackage() == null && bubbleIntent.getComponent() != null)
-                bubbleIntent.setPackage(bubbleIntent.getComponent().getPackageName());
+            Intent bIntent = new Intent(taskIntent);
+            if (bIntent.getPackage() == null && bIntent.getComponent() != null)
+                bIntent.setPackage(bIntent.getComponent().getPackageName());
 
-            // UserHandle.of(userId)
             Object userHandle = mLauncherClassLoader.loadClass("android.os.UserHandle")
                     .getMethod("of", int.class).invoke(null, userId);
 
-            // EntryPoint.NOTIFICATION
-            Class<?> epClass = mLauncherClassLoader.loadClass(
-                    "com.android.wm.shell.shared.bubbles.logging.EntryPoint");
-            Object[] epValues = (Object[]) epClass.getDeclaredField("$VALUES").get(null);
-            Object entryPoint = null;
-            for (Object ep : epValues) if ("NOTIFICATION".equals(ep.toString())) { entryPoint = ep; break; }
+            Class<?> epCls = mLauncherClassLoader.loadClass("com.android.wm.shell.shared.bubbles.logging.EntryPoint");
+            Object ep = null;
+            for (Object e : (Object[]) epCls.getDeclaredField("$VALUES").get(null))
+                if ("NOTIFICATION".equals(e.toString())) { ep = e; break; }
 
-            // 查找 showAppBubble 方法并调用
-            for (Method m : systemUiProxy.getClass().getMethods()) {
+            for (Method m : proxy.getClass().getMethods())
                 if (m.getName().equals("showAppBubble")) {
-                    log(Log.INFO, TAG, "Calling showAppBubble: " + bubbleIntent);
-                    m.invoke(systemUiProxy, bubbleIntent, userHandle, entryPoint, null);
-                    log(Log.INFO, TAG, "showAppBubble succeeded!");
+                    m.invoke(proxy, bIntent, userHandle, ep, null);
+                    log(Log.INFO, TAG, "showAppBubble OK");
                     return true;
                 }
-            }
-            log(Log.WARN, TAG, "showAppBubble not found");
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "bubbleCurrentTask failed: " + t.getMessage());
-        }
+        } catch (Throwable t) { log(Log.ERROR, TAG, "bubbleCurrentTask: " + t.getMessage()); }
         return false;
     }
 
-    /**
-     * 退出多任务界面 — 直接调用 RecentsView.finishRecentsAnimation
-     */
+    private Object findRecentsViewFromHierarchy(View view) {
+        try {
+            Class<?> rvCls = mLauncherClassLoader.loadClass("com.android.quickstep.views.RecentsView");
+            View cur = view;
+            while (cur != null) {
+                if (rvCls.isInstance(cur)) { recentsViewInstance = cur; return cur; }
+                cur = (cur.getParent() instanceof View) ? (View) cur.getParent() : null;
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
     private void dismissOverview(Context ctx) {
         try {
-            // 方案1: 从 View 层级查找 RecentsView（从菜单的 parent 链向上查找）
-            Object rv = recentsViewInstance;
-            if (rv == null) {
-                try {
-                    Class<?> recentsViewClass = mLauncherClassLoader.loadClass(
-                            "com.android.quickstep.views.RecentsView");
-                    // 从 ctx 的所有 View 中递归查找
-                    if (ctx instanceof android.content.ContextWrapper) {
-                        Context base = ctx;
-                        while (base instanceof android.content.ContextWrapper) {
-                            if (base instanceof android.app.Activity) {
-                                android.view.View contentView = ((android.app.Activity) base).findViewById(android.R.id.content);
-                                if (contentView != null) {
-                                    rv = findRecentsViewInTree(contentView, recentsViewClass);
-                                    if (rv != null) recentsViewInstance = rv;
-                                }
-                                break;
-                            }
-                            base = ((android.content.ContextWrapper) base).getBaseContext();
-                        }
-                    }
-                } catch (Throwable ignored) {}
-            }
-
-            if (rv != null) {
-                // 方案1: moveToRestState
-                try {
-                    Method getStateManager = findMethod(rv.getClass(), "getStateManager");
-                    if (getStateManager != null) {
-                        Object sm = getStateManager.invoke(rv);
-                        if (sm != null) {
-                            Method moveToRest = findMethod(sm.getClass(), "moveToRestState");
-                            if (moveToRest != null) {
-                                moveToRest.invoke(sm);
-                                log(Log.INFO, TAG, "dismissed via moveToRestState");
-                                return;
-                            }
-                        }
-                    }
-                } catch (Throwable t) {
-                    log(Log.WARN, TAG, "moveToRestState failed: " + t.getMessage());
-                }
-
-                // 方案2: finishRecentsAnimation
-                try {
-                    Method finishRecents = findMethod(rv.getClass(), "finishRecentsAnimation",
-                            boolean.class, boolean.class, Runnable.class);
-                    if (finishRecents != null) {
-                        finishRecents.invoke(rv, true, false, null);
-                        log(Log.INFO, TAG, "dismissed via finishRecentsAnimation");
-                        return;
-                    }
-                } catch (Throwable t) {
-                    log(Log.WARN, TAG, "finishRecentsAnimation failed: " + t.getMessage());
+            if (recentsViewInstance != null) {
+                Object sm = findMethod(recentsViewInstance.getClass(), "getStateManager").invoke(recentsViewInstance);
+                if (sm != null) {
+                    findMethod(sm.getClass(), "moveToRestState").invoke(sm);
+                    log(Log.INFO, TAG, "dismissed via moveToRestState");
+                    return;
                 }
             }
-
-            // 方案3: 通过 Launcher 的状态管理器
-            try {
-                Class<?> launcherClass = mLauncherClassLoader.loadClass("com.android.launcher3.Launcher");
-                // 遍历 Activity 栈找到 Launcher
-                android.app.ActivityManager am = (android.app.ActivityManager) ctx.getSystemService(android.content.Context.ACTIVITY_SERVICE);
-                java.util.List<android.app.ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(10);
-                for (android.app.ActivityManager.RunningTaskInfo task : tasks) {
-                    if (task.topActivity != null && task.topActivity.getClassName().contains("Launcher")) {
-                        // 找到 Launcher Activity，获取其 state manager
-                        log(Log.INFO, TAG, "Found Launcher task: " + task.topActivity);
-                        break;
-                    }
-                }
-            } catch (Throwable t) {
-                log(Log.WARN, TAG, "Launcher search failed: " + t.getMessage());
-            }
-
-            // 方案4: am start HOME — 兜底
-            Runtime.getRuntime().exec(new String[]{
-                    "am", "start", "-a", "android.intent.action.MAIN",
-                    "-c", "android.intent.category.HOME"});
+            Runtime.getRuntime().exec(new String[]{"am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"});
             log(Log.INFO, TAG, "dismissed via am start HOME");
-
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "dismissOverview failed: " + t.getMessage());
-        }
+        } catch (Throwable t) { log(Log.ERROR, TAG, "dismiss: " + t.getMessage()); }
     }
 
     // ==================== 工具方法 ====================
 
     private static Object getField(Object obj, String name) {
-        try {
-            java.lang.reflect.Field f = obj.getClass().getDeclaredField(name);
-            f.setAccessible(true);
-            return f.get(obj);
-        } catch (Throwable t) { return null; }
+        try { java.lang.reflect.Field f = obj.getClass().getDeclaredField(name);
+            f.setAccessible(true); return f.get(obj); }
+        catch (Throwable t) { return null; }
     }
 
-    private static java.lang.reflect.Field findField(Class<?> clazz, String name) {
-        while (clazz != null) {
-            try { return clazz.getDeclaredField(name); }
-            catch (NoSuchFieldException e) { clazz = clazz.getSuperclass(); }
-        }
-        return null;
+    private static Object invokeGetter(Object obj, String method) {
+        try { Method m = findMethod(obj.getClass(), method); return m != null ? m.invoke(obj) : null; }
+        catch (Throwable t) { return null; }
     }
 
     private static Method findMethod(Class<?> clazz, String name, Class<?>... params) {
         while (clazz != null) {
-            try {
-                Method m = clazz.getDeclaredMethod(name, params);
-                m.setAccessible(true);
-                return m;
-            } catch (NoSuchMethodException e) { clazz = clazz.getSuperclass(); }
+            try { Method m = clazz.getDeclaredMethod(name, params); m.setAccessible(true); return m; }
+            catch (NoSuchMethodException e) { clazz = clazz.getSuperclass(); }
         }
         return null;
     }
