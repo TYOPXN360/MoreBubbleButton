@@ -304,17 +304,12 @@ public class MoreBubbleHookModule extends XposedModule {
         btn.setId(View.generateViewId());
         btn.setTag("bubble_button");
 
-        // 图标：补偿左侧 padding 使内容视觉居中
+        // 图标
         int iconId = res.getIdentifier("ic_bubble_button", "drawable", pkg);
         if (iconId == 0) iconId = res.getIdentifier("ic_bubble_bar", "drawable", pkg);
         if (iconId != 0) {
             android.graphics.drawable.Drawable icon = res.getDrawable(iconId, null);
-            if (icon != null) {
-                btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
-                // 图标宽度约 24dp，加等量右侧 padding 使内容居中
-                int iconW = icon.getIntrinsicWidth();
-                btn.setPaddingRelative(iconW / 2, 0, 0, 0);
-            }
+            if (icon != null) btn.setCompoundDrawablesWithIntrinsicBounds(icon, null, null, null);
         }
 
         btn.setOnClickListener(v -> onBubbleButtonClick((View) btn.getParent().getParent()));

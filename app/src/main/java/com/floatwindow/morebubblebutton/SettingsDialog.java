@@ -81,7 +81,7 @@ public class SettingsDialog {
         resetBtn.setPadding(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 10));
         resetBtn.setGravity(Gravity.CENTER);
         resetBtn.setOnClickListener(v -> {
-            ModuleSettings.setPosX(ctx, 50);
+            ModuleSettings.setPosX(ctx, 42);
             ModuleSettings.setPosY(ctx, 50);
             try { ((android.app.AlertDialog) ((View) v.getParent()).getParent().getParent()).dismiss(); } catch (Throwable ignored) {}
             show(ctx, onDismiss);
