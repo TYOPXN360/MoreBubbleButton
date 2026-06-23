@@ -210,13 +210,7 @@ public class MoreBubbleHookModule extends XposedModule {
     }
 
     private void showPosDialog(Context ctx, Object posPref) {
-        String[] items = {"左侧", "居中", "右侧"};
-        new android.app.AlertDialog.Builder(ctx).setTitle("底部按钮位置")
-                .setSingleChoiceItems(items, ModuleSettings.getBottomPosition(ctx), (d, w) -> {
-                    ModuleSettings.setBottomPosition(ctx, w);
-                    callM(posPref, "setSummary", getPosText(ctx));
-                    d.dismiss();
-                }).show();
+        // 位置设置现在在 SettingsDialog 中处理
     }
 
     // ==================== 操作栏按钮 ====================
@@ -226,14 +220,53 @@ public class MoreBubbleHookModule extends XposedModule {
         Context ctx = ((View) actionsView).getContext();
         android.content.res.Resources res = ctx.getResources();
         String pkg = ctx.getPackageName();
-
-        LinearLayout mActionButtons = null;
-        int abId = res.getIdentifier("action_buttons", "id", pkg);
-        if (abId != 0) mActionButtons = ((View) actionsView).findViewById(abId);
-        if (mActionButtons == null) return;
+        ViewGroup actionsParent = (ViewGroup) actionsView;
 
         Button btn = createBubbleButton(ctx, res, pkg);
-        ensureSecondRow((ViewGroup) actionsView, btn, res, pkg);
+        int positionMode = ModuleSettings.getPositionMode(ctx);
+        if (positionMode == 0) {
+            addToActionButtons(actionsParent, btn, res, pkg);
+        } else {
+            ensureSecondRow(actionsParent, btn, res, pkg);
+        }
+    }
+
+    /**
+     * 模式0：跟随原按钮 — 直接加到 action_buttons 末尾
+     */
+    private void addToActionButtons(ViewGroup actionsParent, Button btn,
+            android.content.res.Resources res, String pkg) {
+        // 如果之前在第二行，先移除
+        if (secondRow != null) {
+            if (bubbleButton != null) ((ViewGroup) secondRow).removeView(bubbleButton);
+            if (((ViewGroup) secondRow).getChildCount() == 0) {
+                actionsParent.removeView(secondRow);
+            }
+            secondRow = null;
+        }
+
+        int abId = res.getIdentifier("action_buttons", "id", pkg);
+        LinearLayout actionButtons = (LinearLayout) actionsParent.findViewById(abId);
+        if (actionButtons == null) return;
+
+        // 去重
+        for (int i = 0; i < actionButtons.getChildCount(); i++) {
+            View child = actionButtons.getChildAt(i);
+            if (child.getTag() != null && "bubble_button".equals(child.getTag().toString())) {
+                bubbleButton = child;
+                return;
+            }
+        }
+
+        // 添加到末尾
+        ViewGroup.MarginLayoutParams mlp = new ViewGroup.MarginLayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        int spId = res.getIdentifier("overview_actions_button_spacing", "dimen", pkg);
+        if (spId != 0) mlp.setMarginStart(res.getDimensionPixelSize(spId));
+        btn.setLayoutParams(mlp);
+        actionButtons.addView(btn);
+        bubbleButton = btn;
+        log(Log.INFO, TAG, "Bubble button added to action_buttons (follow mode)");
     }
 
     private boolean isClearAllButton(View child) {
@@ -298,9 +331,10 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.setTag("bubble_second_row");
         newSecondRow.setOrientation(LinearLayout.HORIZONTAL);
 
-        int pos = ModuleSettings.getBottomPosition(ctx);
-        newSecondRow.setGravity(pos == 0 ? android.view.Gravity.START
-                : pos == 2 ? android.view.Gravity.END : android.view.Gravity.CENTER_HORIZONTAL);
+        // 使用滑动条设置的 gravity
+        int gravity = ModuleSettings.getSecondRowGravity(ctx);
+        newSecondRow.setGravity(gravity == 0 ? android.view.Gravity.START
+                : gravity == 2 ? android.view.Gravity.END : android.view.Gravity.CENTER_HORIZONTAL);
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
