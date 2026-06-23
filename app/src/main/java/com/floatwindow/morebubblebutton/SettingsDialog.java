@@ -3,6 +3,7 @@ package com.floatwindow.morebubblebutton;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
 import android.content.Context;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -92,6 +93,26 @@ public class SettingsDialog {
         });
         sliderContainer.addView(seekBar);
         layout.addView(sliderContainer);
+
+        // 5. 重启启动器按钮
+        TextView restartBtn = new TextView(ctx);
+        restartBtn.setText("重启启动器");
+        restartBtn.setTextSize(15);
+        restartBtn.setTextColor(ctx.getColor(android.R.color.holo_red_light));
+        restartBtn.setPadding(dp(ctx, 16), dp(ctx, 12), dp(ctx, 16), dp(ctx, 4));
+        restartBtn.setGravity(Gravity.CENTER);
+        restartBtn.setOnClickListener(v -> {
+            try {
+                android.os.Handler h = new android.os.Handler(Looper.getMainLooper());
+                h.postDelayed(() -> {
+                    try {
+                        Runtime.getRuntime().exec(new String[]{
+                                "am", "force-stop", "com.google.android.apps.nexuslauncher"});
+                    } catch (Throwable ignored) {}
+                }, 300);
+            } catch (Throwable ignored) {}
+        });
+        layout.addView(restartBtn);
 
         // 设置模式切换联动
         for (int i = 0; i < 2; i++) {
