@@ -10,6 +10,7 @@ public class ModuleSettings {
     private static final String KEY_POSITION_MODE = "position_mode"; // 0=跟随原按钮 1=第二行
     private static final String KEY_POS_X = "pos_x"; // 0-100, 50=居中
     private static final String KEY_POS_Y = "pos_y"; // 0-100, 50=居中
+    private static final String KEY_SYSTEMUI_BUBBLE_ENABLED = "systemui_bubble_enabled";
 
     private static SharedPreferences getPrefs(Context ctx) {
         return ctx.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -51,6 +52,14 @@ public class ModuleSettings {
     }
     public static void setPosY(Context ctx, int v) {
         getPrefs(ctx).edit().putInt(KEY_POS_Y, v).apply();
+    }
+
+    /** 通知横幅气泡按钮开关 */
+    public static boolean isSystemUiBubbleEnabled(Context ctx) {
+        return getPrefs(ctx).getBoolean(KEY_SYSTEMUI_BUBBLE_ENABLED, true);
+    }
+    public static void setSystemUiBubbleEnabled(Context ctx, boolean v) {
+        getPrefs(ctx).edit().putBoolean(KEY_SYSTEMUI_BUBBLE_ENABLED, v).apply();
     }
 
     // 兼容旧接口

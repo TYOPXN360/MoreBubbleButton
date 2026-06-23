@@ -36,6 +36,12 @@ public class SettingsDialog {
                 ModuleSettings.isActionBarEnabled(ctx),
                 (btn, checked) -> ModuleSettings.setActionBarEnabled(ctx, checked)));
 
+        // 2.5. 通知横幅气泡按钮开关
+        layout.addView(createRow(ctx, "通知横幅气泡",
+                "所有应用通知横幅右下角显示气泡图标（非短信独有）",
+                ModuleSettings.isSystemUiBubbleEnabled(ctx),
+                (btn, checked) -> ModuleSettings.setSystemUiBubbleEnabled(ctx, checked)));
+
         // 3. 位置模式选择
         layout.addView(createSectionLabel(ctx, "按钮位置"));
 

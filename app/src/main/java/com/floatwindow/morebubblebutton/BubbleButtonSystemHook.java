@@ -1,6 +1,7 @@
 package com.floatwindow.morebubblebutton;
 
 import android.app.Notification;
+import android.content.Context;
 import android.util.Log;
 import android.view.View;
 
@@ -43,9 +44,6 @@ public class BubbleButtonSystemHook extends XposedModule {
 
     /**
      * Hook NotificationContentView.shouldShowBubbleButton()
-     *
-     * 原逻辑：只在 getPeopleNotificationType() >= 2 && getBubbleMetadata() != null 时返回 true
-     * 新逻辑：对非常驻通知返回 true
      */
     private void hookShouldShowBubbleButton() {
         try {
@@ -53,6 +51,14 @@ public class BubbleButtonSystemHook extends XposedModule {
                     "com.android.systemui.statusbar.notification.row.NotificationContentView");
 
             hook(contentViewClass.getMethod("shouldShowBubbleButton")).intercept(chain -> {
+                // 检查开关是否启用
+                try {
+                    Context ctx = ((View) chain.getThisObject()).getContext();
+                    if (!ModuleSettings.isSystemUiBubbleEnabled(ctx)) {
+                        return chain.proceed(); // 未启用，走原逻辑
+                    }
+                } catch (Throwable ignored) {}
+
                 // 先检查原始条件，如果已经满足就直接返回
                 boolean originalResult = (boolean) chain.proceed();
                 if (originalResult) return true;
