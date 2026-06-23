@@ -354,14 +354,12 @@ public class MoreBubbleHookModule extends XposedModule {
         // 使用 X/Y 坐标定位
         int posX = ModuleSettings.getPosX(ctx);
         int posY = ModuleSettings.getPosY(ctx);
-        // posX: 0=左对齐 50=居中 100=右对齐
-        if (posX < 33) {
-            newSecondRow.setGravity(android.view.Gravity.START);
-        } else if (posX > 66) {
-            newSecondRow.setGravity(android.view.Gravity.END);
-        } else {
-            newSecondRow.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
-        }
+
+        // X 轴：水平对齐
+        int hGravity;
+        if (posX < 33) hGravity = android.view.Gravity.START;
+        else if (posX > 66) hGravity = android.view.Gravity.END;
+        else hGravity = android.view.Gravity.CENTER_HORIZONTAL;
 
         ViewGroup.MarginLayoutParams btnMlp = new ViewGroup.MarginLayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -371,70 +369,40 @@ public class MoreBubbleHookModule extends XposedModule {
         newSecondRow.addView(btn);
         bubbleButton = btn;
 
+        // 定位：和 action_buttons 一样用 layout_gravity=center|bottom
+        // Y 轴通过 bottomMargin 微调偏移
+        FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLp.gravity = hGravity | android.view.Gravity.BOTTOM;
+
+        // Y 偏移：posY 0% = 紧贴底部（与 action_buttons 齐平），100% = 向上偏移 48dp
+        float density = ctx.getResources().getDisplayMetrics().density;
+        int maxOffset = (int)(48 * density); // 最大偏移量 = action_buttons 高度
+        int bottomOffset = (int)((posY / 100f) * maxOffset);
+        rowLp.bottomMargin = bottomOffset;
+
         int insertIndex = 0;
         int abId = res.getIdentifier("action_buttons", "id", pkg);
         View abv = actionsParent.findViewById(abId);
         if (abv != null) insertIndex = actionsParent.indexOfChild(abv) + 1;
 
-        FrameLayout.LayoutParams rowLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         actionsParent.addView(newSecondRow, insertIndex, rowLp);
         secondRow = newSecondRow;
 
+        // 同步 alpha 动画
         newSecondRow.post(() -> {
-            if (abv != null) {
-                int[] loc = new int[2], pLoc = new int[2];
-                abv.getLocationOnScreen(loc);
-                actionsParent.getLocationOnScreen(pLoc);
-
-                int abTop = loc[1] - pLoc[1];
-                int btnH = newSecondRow.getHeight();
-                int parentH = actionsParent.getHeight();
-
-                // 获取设备参数
-                android.util.DisplayMetrics dm = ctx.getResources().getDisplayMetrics();
-                float density = dm.density;
-
-                // 默认间距 = overview_actions_top_margin（约 24dp）
-                int topId = res.getIdentifier("overview_actions_top_margin", "dimen", pkg);
-                int defaultSpacing = topId != 0 ? res.getDimensionPixelSize(topId) : (int)(24 * density);
-
-                // posY 0~100 映射：
-                // 0%   = action_buttons 正上方
-                // 50%  = action_buttons 正下方（默认间距）
-                // 100% = parent 底部
-                float yMin = Math.max(0, abTop - btnH);  // 上方
-                float yMax = Math.max(0, parentH - btnH); // 底部
-                float yDefault = abTop + abv.getHeight() + defaultSpacing; // 默认位置（下方间距）
-
-                // 0~50% 映射到 [yMin, yDefault]
-                // 50~100% 映射到 [yDefault, yMax]
-                float targetY;
-                if (posY <= 50) {
-                    targetY = yMin + (posY / 50f) * (yDefault - yMin);
-                } else {
-                    targetY = yDefault + ((posY - 50) / 50f) * (yMax - yDefault);
-                }
-                targetY = Math.max(0, Math.min(targetY, yMax));
-
-                FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) newSecondRow.getLayoutParams();
-                lp.topMargin = (int) targetY;
-                newSecondRow.setLayoutParams(lp);
-                log(Log.INFO, TAG, "Y=" + posY + " margin=" + (int) targetY
-                        + " range=[" + (int) yMin + "," + (int) yMax + "]"
-                        + " abTop=" + abTop + " abH=" + abv.getHeight()
-                        + " btnH=" + btnH + " parentH=" + parentH
-                        + " parentLoc=" + pLoc[1] + " abLoc=" + loc[1]
-                        + " density=" + density);
+            View abv2 = actionsParent.findViewById(
+                    res.getIdentifier("action_buttons", "id", pkg));
+            if (abv2 != null) {
+                actionsParent.getViewTreeObserver().addOnPreDrawListener(
+                        new ViewTreeObserver.OnPreDrawListener() {
+                            @Override public boolean onPreDraw() {
+                                if (secondRow != null && abv2 != null)
+                                    secondRow.setAlpha(abv2.getAlpha());
+                                return true;
+                            }
+                        });
             }
-            actionsParent.getViewTreeObserver().addOnPreDrawListener(
-                    new ViewTreeObserver.OnPreDrawListener() {
-                        @Override public boolean onPreDraw() {
-                            if (secondRow != null && abv != null)
-                                secondRow.setAlpha(abv.getAlpha());
-                            return true;
-                        }
-                    });
         });
     }
 
