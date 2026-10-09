@@ -182,39 +182,30 @@ public class MoreBubbleHookModule extends XposedModule {
         // the row enters Heads-up mode.
         hookHeadsUpRowLifecycle(cl);
 
-        // 2. Make system think it can bubble by hooking NotificationEntry.canBubble
+        // 2. Make system think it can bubble by hooking Ranking.canBubble
         try {
-            Class<?> entryClass = cl.loadClass("com.android.systemui.statusbar.notification.collection.NotificationEntry");
+            Class<?> rankingClass = cl.loadClass("android.service.notification.NotificationListenerService$Ranking");
             java.lang.reflect.Method canBubbleMethod = null;
             try {
-                canBubbleMethod = entryClass.getDeclaredMethod("canBubble");
+                canBubbleMethod = rankingClass.getDeclaredMethod("canBubble");
             } catch (NoSuchMethodException e) {
-                // It might not exist in all versions, ignore if not found
+                // Ignore
             }
             if (canBubbleMethod != null) {
                 hook(canBubbleMethod).intercept(chain -> {
                     boolean result = (boolean) chain.proceed();
                     if (result) return true;
-                    try {
-                        Object entry = chain.getThisObject();
-                        Object sbn = getFieldSystemUi(entry, "mSbn");
-                        Notification notif = sbn != null ? (Notification) invokeSystemUi(sbn, "getNotification") : null;
-                        if (notif != null 
-                                && (notif.flags & Notification.FLAG_ONGOING_EVENT) == 0 
-                                && notif.contentIntent != null) {
-                            return true;
-                        }
-                    } catch (Throwable t) {
-                        // ignore
-                    }
-                    return result;
+                    // Always return true to trick the inflation pipeline.
+                    // If it's an ongoing notification, prepareBubbleMetadata will skip it,
+                    // and refreshBubbleButton will immediately hide the button anyway.
+                    return true;
                 });
-                Log.i(TAG, "Hooked NotificationEntry.canBubble OK");
+                Log.i(TAG, "Hooked Ranking.canBubble OK");
             } else {
-                Log.w(TAG, "NotificationEntry.canBubble method not found");
+                Log.w(TAG, "Ranking.canBubble method not found");
             }
         } catch (Throwable t) {
-            Log.w(TAG, "Hook NotificationEntry canBubble: " + t.getMessage());
+            Log.w(TAG, "Hook Ranking canBubble: " + t.getMessage());
         }
 
         // 3. BubblesManager.expandStackAndSelectBubble - 拦截系统点击调用
