@@ -410,6 +410,7 @@ public class MoreBubbleHookModule extends XposedModule {
     private void hookNotificationContentLifecycle(Class<?> contentViewClass) {
         hookContentMethod(contentViewClass, "setHeadsUpChild");
         hookContentMethod(contentViewClass, "setContractedChild");
+        hookContentMethod(contentViewClass, "setExpandedChild");
         hookContentMethod(contentViewClass, "setHeadsUp");
         hookContentMethod(contentViewClass, "selectLayout");
         hookContentMethod(contentViewClass, "onAttachedToWindow");
@@ -433,7 +434,7 @@ public class MoreBubbleHookModule extends XposedModule {
                     method.setAccessible(true);
                     hook(method).intercept(chain -> {
                         Object contentView = chain.getThisObject();
-                        if ("onNotificationUpdated".equals(name) || "updateBubbleButton".equals(name)) {
+                        if ("onNotificationUpdated".equals(name) || "updateBubbleButton".equals(name) || "setExpandedChild".equals(name)) {
                             Object row = getFieldSystemUi(contentView, "mContainingNotification");
                             prepareBubbleMetadata(getNotificationEntryFromRow(row));
                         }
@@ -442,7 +443,8 @@ public class MoreBubbleHookModule extends XposedModule {
                         
                         updateHeadsUpSwipeHandle(contentView);
                         if ("onNotificationUpdated".equals(name)
-                                || "setBubbleClickListener".equals(name)) {
+                                || "setBubbleClickListener".equals(name)
+                                || "setExpandedChild".equals(name)) {
                             Object row = getFieldSystemUi(contentView, "mContainingNotification");
                             if (!"onNotificationUpdated".equals(name)) {
                                 prepareBubbleMetadata(getNotificationEntryFromRow(row));
@@ -469,8 +471,8 @@ public class MoreBubbleHookModule extends XposedModule {
             hookRowMethods(rowClass, "onLayout", false);
             hookRowMethods(rowClass, "onAttachedToWindow", false);
             hookRowMethods(rowClass, "onDetachedFromWindow", false);
-            hookRowMethods(rowClass, "setUserExpanded", false);
-            hookRowMethods(rowClass, "setUserSwipingToExpandRow", false);
+            hookRowMethods(rowClass, "setUserExpanded", true);
+            hookRowMethods(rowClass, "setUserSwipingToExpandRow", true);
             hookRowMethods(rowClass, "setOnKeyguard", false);
             hookRowMethods(rowClass, "setHeadsUpAnimatingAway", false);
             hookRowMethods(rowClass, "onNotificationUpdated", true);
@@ -581,7 +583,7 @@ public class MoreBubbleHookModule extends XposedModule {
                                 && !isHeadsUpPopupAvailable(row)) {
                             cancelHeadsUpRowSync(row);
                             removeSwipeHandle(row);
-                            return result;
+                            // Do not return early; allow refreshBubble logic to execute
                         }
                         if (refreshBubble && !"updateBubbleButton".equals(name)) {
                             // Already called prepareBubbleMetadata above for onNotificationUpdated.
