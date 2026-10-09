@@ -20,6 +20,7 @@ public class ModuleSettings {
     public static final String KEY_POPUP_PRESENTATION = "popup_presentation"; // 0=按钮 1=下滑横条
     public static final String KEY_SWIPE_HANDLE_LENGTH = "swipe_handle_length_dp";
     public static final String KEY_SWIPE_HANDLE_THICKNESS = "swipe_handle_thickness_dp";
+    public static final String KEY_SWIPE_HANDLE_BOTTOM_MARGIN = "swipe_handle_bottom_margin_dp";
 
     public static final int OPEN_MODE_BUBBLE = 0;
     public static final int OPEN_MODE_FREEFORM = 1;
@@ -27,6 +28,7 @@ public class ModuleSettings {
     public static final int POPUP_PRESENTATION_SWIPE_HANDLE = 1;
     public static final int DEFAULT_SWIPE_HANDLE_LENGTH_DP = 56;
     public static final int DEFAULT_SWIPE_HANDLE_THICKNESS_DP = 7;
+    public static final int DEFAULT_SWIPE_HANDLE_BOTTOM_MARGIN_DP = 3;
     private static final Uri SETTINGS_URI = SettingsProvider.CONTENT_URI;
     private static final long REMOTE_CACHE_MS = 250L;
     private static volatile long sRemoteCacheAt;
@@ -170,6 +172,16 @@ public class ModuleSettings {
     public static void setSwipeHandleThickness(Context ctx, int value) {
         getPrefs(ctx).edit().putInt(KEY_SWIPE_HANDLE_THICKNESS,
                 clamp(value, 3, 14)).apply();
+    }
+
+    public static int getSwipeHandleBottomMargin(Context ctx) {
+        return clamp(getInt(ctx, KEY_SWIPE_HANDLE_BOTTOM_MARGIN,
+                DEFAULT_SWIPE_HANDLE_BOTTOM_MARGIN_DP), 0, 32);
+    }
+
+    public static void setSwipeHandleBottomMargin(Context ctx, int value) {
+        getPrefs(ctx).edit().putInt(KEY_SWIPE_HANDLE_BOTTOM_MARGIN,
+                clamp(value, 0, 32)).apply();
     }
 
     private static int clampPercent(int v) {

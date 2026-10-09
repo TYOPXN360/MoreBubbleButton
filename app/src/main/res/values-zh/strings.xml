@@ -28,6 +28,8 @@
     <string name="swipe_handle_thickness">横条粗细</string>
     <string name="swipe_handle_length_hint">32dp 最短 · 96dp 最长</string>
     <string name="swipe_handle_thickness_hint">3dp 最细 · 14dp 最粗</string>
+    <string name="swipe_handle_bottom_margin">底部边距</string>
+    <string name="swipe_handle_bottom_margin_hint">横条到底部的距离 (0dp - 32dp)</string>
     <string name="swipe_handle_value">%1$s · %2$ddp</string>
     <string name="position_mode_title">显示行</string>
     <string name="position_mode_follow">跟随原按钮</string>

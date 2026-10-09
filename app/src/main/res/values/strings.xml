@@ -28,6 +28,8 @@
     <string name="swipe_handle_thickness">Handle thickness</string>
     <string name="swipe_handle_length_hint">32dp short · 96dp long</string>
     <string name="swipe_handle_thickness_hint">3dp thin · 14dp thick</string>
+    <string name="swipe_handle_bottom_margin">Bottom margin</string>
+    <string name="swipe_handle_bottom_margin_hint">Distance from bottom (0dp - 32dp)</string>
     <string name="swipe_handle_value">%1$s · %2$ddp</string>
     <string name="position_mode_title">Display row</string>
     <string name="position_mode_follow">Follow original</string>

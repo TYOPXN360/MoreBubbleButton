@@ -118,9 +118,6 @@ public class MoreBubbleHookModule extends XposedModule {
                         Context ctx = null;
                         try { ctx = ((View) chain.getThisObject()).getContext(); } catch (Throwable ignored) {}
                         if (ctx != null && !ModuleSettings.isSystemUiBubbleEnabled(ctx)) return chain.proceed();
-                        if (ctx != null && ModuleSettings.getPopupPresentation(ctx)
-                                == ModuleSettings.POPUP_PRESENTATION_SWIPE_HANDLE
-                                && isHeadsUpContentView(chain.getThisObject())) return false;
                     } catch (Throwable ignored) {}
                     boolean original = (boolean) chain.proceed();
                     if (original) return true;
@@ -441,6 +438,21 @@ public class MoreBubbleHookModule extends XposedModule {
                         
                         Object result = chain.proceed();
                         
+                        if ("updateBubbleButton".equals(name) && chain.getArgs().size() == 1 && chain.getArg(0) != null) {
+                            Object child = chain.getArg(0);
+                            Object headsUpChild = getFieldSystemUi(contentView, "mHeadsUpChild");
+                            if (child == headsUpChild) {
+                                Context ctx = null;
+                                try { ctx = ((View) contentView).getContext(); } catch (Throwable ignored) {}
+                                if (ctx != null && ModuleSettings.getPopupPresentation(ctx) == ModuleSettings.POPUP_PRESENTATION_SWIPE_HANDLE) {
+                                    View button = ((View) child).findViewById(0x01020281);
+                                    if (button != null) {
+                                        button.setVisibility(View.GONE);
+                                    }
+                                }
+                            }
+                        }
+                        
                         updateHeadsUpSwipeHandle(contentView);
                         if ("onNotificationUpdated".equals(name)
                                 || "setBubbleClickListener".equals(name)
@@ -648,6 +660,19 @@ public class MoreBubbleHookModule extends XposedModule {
         }
     }
 
+    private static void hideBubbleButtonInHeadsUp(Object row) {
+        Object contentView = getFieldSystemUi(row, "mPrivateLayout");
+        if (contentView != null) {
+            View headsUpChild = (View) getFieldSystemUi(contentView, "mHeadsUpChild");
+            if (headsUpChild != null) {
+                View button = headsUpChild.findViewById(0x01020281); // bubble_button
+                if (button != null) {
+                    button.setVisibility(View.GONE);
+                }
+            }
+        }
+    }
+
     private static void syncHeadsUpSwipeHandle(Object row) {
         if (!(row instanceof ViewGroup)) return;
         ViewGroup rowView = (ViewGroup) row;
@@ -666,6 +691,9 @@ public class MoreBubbleHookModule extends XposedModule {
             boolean validNotification = notification != null
                     && (notification.flags & Notification.FLAG_ONGOING_EVENT) == 0
                     && notification.contentIntent != null;
+            if (enabled && validNotification && isHeadsUpPopupAvailable(row)) {
+                hideBubbleButtonInHeadsUp(row);
+            }
             if (!enabled || !validNotification || !isHeadsUpPopupAvailable(row)) {
                 removeSwipeHandle(row);
                 return;
@@ -836,7 +864,7 @@ public class MoreBubbleHookModule extends XposedModule {
 
     private static void positionSwipeHandle(ViewGroup host, View handle, Context ctx) {
         int handleHeight = dp(ctx, 30);
-        int bottomMargin = dp(ctx, 3);
+        int bottomMargin = dp(ctx, ModuleSettings.getSwipeHandleBottomMargin(ctx));
         int actualHeight = 0;
         Object value = invokeSystemUi(host, "getActualHeight");
         if (value instanceof Number) actualHeight = ((Number) value).intValue();

@@ -1,0 +1,3 @@
+#!/bin/bash
+sed -i '/private static void syncHeadsUpSwipeHandle(Object row) {/i \
+    private static void hideBubbleButtonInHeadsUp(Object row) {\n        Object contentView = getFieldSystemUi(row, "mPrivateLayout");\n        if (contentView != null) {\n            View headsUpChild = (View) getFieldSystemUi(contentView, "mHeadsUpChild");\n            if (headsUpChild != null) {\n                View button = headsUpChild.findViewById(0x01020281); \/\/ bubble_button\n                if (button != null) {\n                    button.setVisibility(View.GONE);\n                }\n            }\n        }\n    }\n' app/src/main/java/com/floatwindow/morebubblebutton/MoreBubbleHookModule.java

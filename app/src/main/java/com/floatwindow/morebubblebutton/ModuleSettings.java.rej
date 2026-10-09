@@ -1,0 +1,27 @@
+--- ModuleSettings.java
++++ ModuleSettings.java
+@@ -165,6 +165,24 @@
+         return val != null ? val : DEFAULT_SWIPE_HANDLE_THICKNESS_DP;
+     }
+ 
++    public static void setSwipeHandleBottomMargin(Context ctx, int marginDp) {
++        if (isModuleContext(ctx)) {
++            getPrefs(ctx).edit().putInt(KEY_SWIPE_HANDLE_BOTTOM_MARGIN, marginDp).apply();
++        } else {
++            throw new IllegalStateException("Cannot write settings from SystemUI");
++        }
++    }
++
++    public static int getSwipeHandleBottomMargin(Context ctx) {
++        if (isModuleContext(ctx)) {
++            return getPrefs(ctx).getInt(KEY_SWIPE_HANDLE_BOTTOM_MARGIN, DEFAULT_SWIPE_HANDLE_BOTTOM_MARGIN_DP);
++        }
++        Map<String, String> remote = getRemoteSettings(ctx);
++        if (remote == null) return DEFAULT_SWIPE_HANDLE_BOTTOM_MARGIN_DP;
++        Integer val = parseInt(remote.get(KEY_SWIPE_HANDLE_BOTTOM_MARGIN));
++        return val != null ? val : DEFAULT_SWIPE_HANDLE_BOTTOM_MARGIN_DP;
++    }
++
+     private static Integer parseInt(String s) {
+         if (s == null) return null;
+         try {

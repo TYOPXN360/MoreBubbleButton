@@ -88,6 +88,9 @@ fun SettingsScreen() {
     var swipeHandleThickness by remember {
         mutableFloatStateOf(ModuleSettings.getSwipeHandleThickness(ctx).toFloat())
     }
+    var swipeHandleBottomMargin by remember {
+        mutableFloatStateOf(ModuleSettings.getSwipeHandleBottomMargin(ctx).toFloat())
+    }
     var positionMode by remember { mutableIntStateOf(ModuleSettings.getPositionMode(ctx)) }
     var sliderX by remember { mutableFloatStateOf(ModuleSettings.getPosX(ctx).toFloat()) }
     var sliderY by remember { mutableFloatStateOf(ModuleSettings.getPosY(ctx).toFloat()) }
@@ -216,6 +219,27 @@ fun SettingsScreen() {
                             onStep = { delta ->
                                 swipeHandleThickness = (swipeHandleThickness + delta).coerceIn(3f, 14f)
                                 ModuleSettings.setSwipeHandleThickness(ctx, swipeHandleThickness.toInt())
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        FineTuneSlider(
+                            label = stringResource(R.string.swipe_handle_bottom_margin),
+                            hint = stringResource(R.string.swipe_handle_bottom_margin_hint),
+                            value = swipeHandleBottomMargin,
+                            valueText = stringResource(
+                                R.string.swipe_handle_value,
+                                stringResource(R.string.swipe_handle_bottom_margin),
+                                swipeHandleBottomMargin.toInt()
+                            ),
+                            valueRange = 0f..32f,
+                            steps = 31,
+                            onValueChange = { swipeHandleBottomMargin = it },
+                            onCommit = {
+                                ModuleSettings.setSwipeHandleBottomMargin(ctx, swipeHandleBottomMargin.toInt())
+                            },
+                            onStep = { delta ->
+                                swipeHandleBottomMargin = (swipeHandleBottomMargin + delta).coerceIn(0f, 32f)
+                                ModuleSettings.setSwipeHandleBottomMargin(ctx, swipeHandleBottomMargin.toInt())
                             }
                         )
                     }
